@@ -21,11 +21,7 @@ coverage/
 .cache/
 
 # Supabase (local development only)
-supabase/.temp/
-supabase/.branches/
-supabase/.functions/
-supabase/config.toml
-supabase/migrations/
+supabase/
 
 # Data & Import Files
 *.csv
