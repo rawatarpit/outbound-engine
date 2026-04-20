@@ -30,9 +30,12 @@ supabase/
 data/
 uploads/
 
-# Docs (not needed in worker repo)
-
+# Docs (keep essential docs)
+*.md
 !AGENTS.md
+!README.md
+!03_E2E_TESTING_GUIDE.md
+!02_BUGS_AND_FIXES.md
 
 # Credentials (never commit)
 *credentials*.json
