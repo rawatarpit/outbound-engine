@@ -31,7 +31,7 @@ data/
 uploads/
 
 # Docs (not needed in worker repo)
-*.md
+
 !AGENTS.md
 
 # Credentials (never commit)
