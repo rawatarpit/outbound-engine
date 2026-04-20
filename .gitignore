@@ -1,0 +1,44 @@
+# Node
+node_modules/
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# Environment Files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Mac
+.DS_Store
+
+# Coverage & Cache
+coverage/
+.cache/
+
+# Supabase (local development only)
+supabase/.temp/
+supabase/.branches/
+supabase/.functions/
+supabase/config.toml
+supabase/migrations/
+
+# Data & Import Files
+*.csv
+*.xlsx
+*.xls
+data/
+uploads/
+
+# Docs (not needed in worker repo)
+*.md
+!AGENTS.md
+
+# Credentials (never commit)
+*credentials*.json
+*secrets*.json
+service-account-*.json

@@ -1,0 +1,22 @@
+name: Ping Render
+on:
+  schedule:
+    - cron: "*/10 * * * *" # Every 10 minutes
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render API
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://outbound-engine.onrender.com/ping || echo "000")
+          echo "Ping response: $response"
+          if [ "$response" != "200" ]; then
+            echo "Warning: Render API returned $response"
+          fi
+
+      - name: Ping Health Endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://outbound-engine.onrender.com/health || echo "000")
+          echo "Health check response: $response"
