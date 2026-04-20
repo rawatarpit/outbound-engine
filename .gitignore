@@ -12,7 +12,7 @@ logs/
 .env.local
 .env.production
 .env.*.local
-
+supabase/
 # Mac
 .DS_Store
 
@@ -33,7 +33,6 @@ uploads/
 # Docs (keep essential docs)
 *.md
 !AGENTS.md
-!README.md
 !03_E2E_TESTING_GUIDE.md
 !02_BUGS_AND_FIXES.md
 
