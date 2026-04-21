@@ -13,7 +13,7 @@ import {
 import { normalizeDomain, normalizeEmail } from "./normalizer"
 import { DiscoveryRisk } from "./types"
 
-const logger = pino({ level: "info" })
+const logger = pino({ level: "debug" })
 
 const CLAIM_BATCH_SIZE = 20
 const LOOP_INTERVAL_MS = 8000

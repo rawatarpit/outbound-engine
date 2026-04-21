@@ -12,7 +12,7 @@ import { DiscoveryError } from "./errors"
 
 import type { DiscoveryResult } from "./types"
 
-const logger = pino({ level: "info" })
+const logger = pino({ level: "debug" })
 
 /* =========================================================
    CONFIG
@@ -131,8 +131,19 @@ export async function executeSource(
        3. VALIDATE CONFIG
     ------------------------------------------ */
 
-    const validatedConfig =
-      registered.schema.parse(source.config)
+    let validatedConfig
+    try {
+      validatedConfig = registered.schema.parse(source.config)
+    } catch (parseError: any) {
+      logger.error(
+        { sourceId: source.id, type: source.type, rawConfig: source.config, parseError: parseError?.message },
+        "Config validation failed - source config format mismatch"
+      )
+      throw new DiscoveryError(
+        `Config validation failed: ${parseError?.message}`,
+        "fatal"
+      )
+    }
 
     /* ------------------------------------------
        4. EXECUTE WITH TIMEOUT

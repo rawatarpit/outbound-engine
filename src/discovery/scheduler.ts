@@ -11,7 +11,7 @@ import {
 
 import { executeSource } from "./engine";
 
-const logger = pino({ level: "info" });
+const logger = pino({ level: "debug" });
 
 const CLAIM_BATCH_SIZE = 5;
 const LOOP_INTERVAL_MS = 10_000;
@@ -263,11 +263,17 @@ export async function startDiscoveryScheduler() {
       const sources = await claimDiscoverySources(CLAIM_BATCH_SIZE);
 
       if (!sources?.length) {
+        logger.debug("No sources claimed, waiting...");
         await sleep(LOOP_INTERVAL_MS);
         continue;
       }
 
       const limited = sources.slice(0, MAX_CONCURRENT_EXECUTIONS);
+
+      logger.info(
+        { claimed: sources.length, toExecute: limited.length, sources: limited.map(s => ({ id: s.id, type: s.type, brand_id: s.brand_id })) },
+        "Sources claimed"
+      );
 
       await Promise.all(limited.map(processSource));
     } catch (error: any) {
