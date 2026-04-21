@@ -18,6 +18,12 @@ export async function startDiscoverySystem() {
   console.error("[DISCOVERY] Discovery scheduler and processor started")
 }
 
+// Start if run directly
+startDiscoverySystem().catch((err) => {
+  logger.fatal({ err }, "Discovery system failed to start")
+  process.exit(1)
+})
+
 /* =========================================================
    GRACEFUL SHUTDOWN
 ========================================================= */
