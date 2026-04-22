@@ -124,7 +124,7 @@ export const csvExecutor: Executor<CsvConfig> =
         contacts,
         meta: {
           executor: "csv",
-          risk: "low" as any,
+          risk: "SAFE_API" as any,
           total_fetched: records.length,
           total_companies: companies.length,
           total_contacts: contacts.length,

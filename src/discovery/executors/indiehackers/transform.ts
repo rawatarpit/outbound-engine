@@ -11,7 +11,7 @@ import { normalizeDomain } from "../../normalizer"
 ========================================================= */
 
 const IH_RISK: DiscoveryRisk =
-  "medium" as DiscoveryRisk
+  "MODERATE_PUBLIC" as DiscoveryRisk
 
 /* =========================================================
    RAW TYPES (Minimal Public Profile)

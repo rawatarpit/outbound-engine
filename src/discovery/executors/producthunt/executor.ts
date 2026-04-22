@@ -174,7 +174,7 @@ export const productHuntExecutor:
         contacts,
         meta: {
           executor: "producthunt",
-          risk: "medium" as any,
+          risk: "MODERATE_PUBLIC" as any,
           total_fetched: edges.length,
           total_companies: companies.length,
           total_contacts: contacts.length,

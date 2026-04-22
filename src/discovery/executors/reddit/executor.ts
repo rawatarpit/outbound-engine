@@ -129,7 +129,7 @@ export async function redditExecutor(
     meta: {
       ...result.meta,
       executor: "reddit",
-      risk: "medium" as any,
+      risk: "MODERATE_PUBLIC" as any,
       total_fetched: allPosts.length,
       total_companies: result.companies?.length ?? 0,
       rate_limited: rateLimited,

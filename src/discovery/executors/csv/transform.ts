@@ -10,7 +10,7 @@ import {
 } from "../../normalizer"
 
 const CSV_RISK: DiscoveryRisk =
-  "low" as DiscoveryRisk
+  "SAFE_API" as DiscoveryRisk
 
 export function transformCsvRow(
   row: Record<string, string>,

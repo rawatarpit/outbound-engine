@@ -30,7 +30,7 @@ interface HunterResponse {
 ========================================================= */
 
 const HUNTER_RISK: DiscoveryRisk =
-  "low" as DiscoveryRisk
+  "SAFE_API" as DiscoveryRisk
 
 /* =========================================================
    TRANSFORM FUNCTION
