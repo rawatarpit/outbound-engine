@@ -183,35 +183,33 @@ export async function executeSource(
     const safeContacts = (results.contacts ?? [])
       .slice(0, MAX_GLOBAL_ITEMS)
 
-    /* ------------------------------------------
-       6. PREPARE COMPANIES
-    ------------------------------------------ */
+/* ------------------------------------------
+       6. PREPARE COMPANIES (DEDUP BY DOMAIN)
+     ------------------------------------------ */
 
-    const companyRows = safeCompanies
-      .map((company) => {
-        if (!company.domain) return null
+    const domainSeen = new Set<string>()
+    const companyRows: any[] = []
 
-        const normalizedDomain =
-          normalizeDomain(company.domain)
-
-        if (!normalizedDomain) return null
-
-        return {
-          brand_id: source.brand_id,
-          source_id: source.id,
-          name: company.name ?? null,
-          domain: normalizedDomain,
-          raw_payload: company.raw ?? company,
-          processed: false,
-          ingested: false,
-          risk: company.risk ?? null,
-          confidence: company.confidence ?? null,
-          intent_score: company.intent_score ?? null,
-          requires_enrichment:
-            company.requires_enrichment ?? false
-        }
+    for (const company of safeCompanies) {
+      if (!company.domain) continue
+      const normalizedDomain = normalizeDomain(company.domain)
+      if (!normalizedDomain) continue
+      if (domainSeen.has(normalizedDomain)) continue
+      domainSeen.add(normalizedDomain)
+      companyRows.push({
+        brand_id: source.brand_id,
+        source_id: source.id,
+        name: company.name ?? null,
+        domain: normalizedDomain,
+        raw_payload: company.raw ?? company,
+        processed: false,
+        ingested: false,
+        risk: company.risk ?? null,
+        confidence: company.confidence ?? null,
+        intent_score: company.intent_score ?? null,
+        requires_enrichment: company.requires_enrichment ?? false
       })
-      .filter(Boolean)
+    }
 
     if (companyRows.length > 0) {
       console.log(`[DB] Upserting ${companyRows.length} companies to discovered_companies table...`)
@@ -255,45 +253,37 @@ export async function executeSource(
        8. PREPARE CONTACTS
     ------------------------------------------ */
 
-    const contactRows = safeContacts
-      .map((contact) => {
-        const normalizedDomain =
-          normalizeDomain(contact.domain)
+    const emailSeen = new Set<string>()
+    const contactRows: any[] = []
 
-        if (!normalizedDomain) return null
-
-        const companyId =
-          companyMap.get(normalizedDomain)
-
-        if (!companyId) return null
-
-        const normalizedEmail =
-          contact.email
-            ? normalizeEmail(contact.email)
-            : null
-
-        return {
-          brand_id: source.brand_id,
-          source_id: source.id,
-          discovered_company_id: companyId,
-          first_name: contact.first_name ?? null,
-          last_name: contact.last_name ?? null,
-          full_name: contact.full_name ?? null,
-          email: normalizedEmail,
-          title: contact.title ?? null,
-          linkedin_url:
-            contact.linkedin_url ?? null,
-          raw_payload: contact.raw ?? contact,
-          processed: false,
-          ingested: false,
-          risk: contact.risk ?? null,
-          confidence: contact.confidence ?? null,
-          intent_score: contact.intent_score ?? null,
-          requires_enrichment:
-            contact.requires_enrichment ?? true
-        }
+    for (const contact of safeContacts) {
+      const normalizedDomain = normalizeDomain(contact.domain)
+      if (!normalizedDomain) continue
+      const companyId = companyMap.get(normalizedDomain)
+      if (!companyId) continue
+      const normalizedEmail = contact.email ? normalizeEmail(contact.email) : null
+      if (!normalizedEmail) continue
+      if (emailSeen.has(normalizedEmail)) continue
+      emailSeen.add(normalizedEmail)
+      contactRows.push({
+        brand_id: source.brand_id,
+        source_id: source.id,
+        discovered_company_id: companyId,
+        first_name: contact.first_name ?? null,
+        last_name: contact.last_name ?? null,
+        full_name: contact.full_name ?? null,
+        email: normalizedEmail,
+        title: contact.title ?? null,
+        linkedin_url: contact.linkedin_url ?? null,
+        raw_payload: contact.raw ?? contact,
+        processed: false,
+        ingested: false,
+        risk: contact.risk ?? null,
+        confidence: contact.confidence ?? null,
+        intent_score: contact.intent_score ?? null,
+        requires_enrichment: contact.requires_enrichment ?? true
       })
-      .filter(Boolean)
+    }
 
     if (contactRows.length > 0) {
       const { error: contactError } = await supabase
