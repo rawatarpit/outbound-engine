@@ -214,11 +214,25 @@ export async function executeSource(
       .filter(Boolean)
 
     if (companyRows.length > 0) {
-      await supabase
+      console.log(`[DB] Upserting ${companyRows.length} companies to discovered_companies table...`)
+      console.log(`[DB] Sample row:`, JSON.stringify(companyRows[0], null, 2))
+      const { data, error: companyError } = await supabase
         .from("discovered_companies")
         .upsert(companyRows, {
           onConflict: "brand_id,domain"
         })
+
+      if (companyError) {
+        console.error(`[DB ERROR] Failed to insert companies:`, companyError.message)
+        console.error(`[DB ERROR] Full error:`, JSON.stringify(companyError, null, 2))
+        logger.error(
+          { sourceId: source.id, error: companyError.message, count: companyRows.length },
+          "Failed to insert discovered companies"
+        )
+        throw new Error(`Failed to insert companies: ${companyError.message}`)
+      } else {
+        console.log(`[DB] Successfully inserted ${companyRows.length} companies`)
+      }
     }
 
     /* ------------------------------------------
