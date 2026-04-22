@@ -23,7 +23,7 @@ interface GithubRepo {
 ========================================================= */
 
 const GITHUB_RISK: DiscoveryRisk =
-  "moderate_public" as DiscoveryRisk
+  "medium" as DiscoveryRisk
 
 /* =========================================================
    TRANSFORM FUNCTION

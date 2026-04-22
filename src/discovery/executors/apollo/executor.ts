@@ -101,7 +101,7 @@ export const apolloExecutor: Executor<ApolloConfig> =
         contacts: safeContacts,
         meta: {
           executor: "apollo",
-          risk: "safe_api" as any,
+          risk: "low" as any,
           total_fetched: safeContacts.length,
           total_companies: safeCompanies.length,
           total_contacts: safeContacts.length,

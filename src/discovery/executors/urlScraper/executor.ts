@@ -133,7 +133,7 @@ export const urlScraperExecutor: Executor<UrlScraperConfig> = async ({
       contacts: filteredContacts,
       meta: {
         executor: "url_scraper",
-        risk: "HIGH_SCRAPE" as any,
+        risk: "high" as any,
         total_fetched: companies.length + filteredContacts.length,
         total_companies: companies.length,
         total_contacts: filteredContacts.length,

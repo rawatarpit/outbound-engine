@@ -233,6 +233,7 @@ export async function processSendQueue(brandId: string) {
           lead_id: lead.id,
           company_id: company.id,
           message_key: deterministicId,
+          direction: "outbound",
           status: "pending",
           smtp_message_id: null,
         });

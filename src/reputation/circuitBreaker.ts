@@ -66,10 +66,11 @@ async function saveBreakerState(brandId: string, breaker: BrandBreaker) {
   const { error } = await supabase.from("circuit_breaker_state").upsert(
     {
       brand_id: brandId,
-      failures: breaker.failures,
+      failure_count: breaker.failures,
       last_failure_at: new Date(breaker.lastFailureAt).toISOString(),
       state: breaker.state,
-      cooldown_until: breaker.cooldownUntil || null,
+      reset_at: breaker.cooldownUntil ? new Date(breaker.cooldownUntil).toISOString() : null,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "brand_id" },

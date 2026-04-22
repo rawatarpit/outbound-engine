@@ -25,7 +25,7 @@ export function transformScrapedData(params: {
 
   const company: DiscoveryCompany = {
     source: "url_scraper",
-    risk: "HIGH_SCRAPE" as any,
+    risk: "high" as any,
     name: params.scrapedData.name ?? params.companyName ?? undefined,
     domain,
   };
@@ -34,7 +34,7 @@ export function transformScrapedData(params: {
     (c) => {
       const contact: DiscoveryContact = {
         source: "url_scraper",
-        risk: "HIGH_SCRAPE" as any,
+        risk: "high" as any,
         domain: domain,
         first_name: c.name?.split(" ")[0] ?? undefined,
         last_name: c.name?.split(" ").slice(1).join(" ") ?? undefined,

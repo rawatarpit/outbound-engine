@@ -86,7 +86,7 @@ export const hunterExecutor: Executor<HunterConfig> =
         contacts: safeContacts,
         meta: {
           executor: "hunter",
-          risk: "safe_api" as any,
+          risk: "low" as any,
           total_fetched: safeContacts.length,
           total_companies: safeCompanies.length,
           total_contacts: safeContacts.length,

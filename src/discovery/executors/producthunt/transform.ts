@@ -10,7 +10,7 @@ import { normalizeDomain } from "../../normalizer"
 ========================================================= */
 
 const PH_RISK: DiscoveryRisk =
-  "moderate_public" as DiscoveryRisk
+  "medium" as DiscoveryRisk
 
 /* =========================================================
    HELPERS

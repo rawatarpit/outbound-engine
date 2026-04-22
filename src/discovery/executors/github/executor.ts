@@ -138,7 +138,7 @@ export const githubExecutor: Executor<GithubConfig> =
             source_url: repo.html_url,
 
             // 🔥 Use correct enum/value from your types
-            risk: "moderate_public" as DiscoveryRisk,
+            risk: "medium" as DiscoveryRisk,
 
             confidence: 0.7,
 
@@ -162,7 +162,7 @@ export const githubExecutor: Executor<GithubConfig> =
           executor: "github",
 
           // 🔥 REQUIRED FIELD
-          risk: "moderate_public" as DiscoveryRisk,
+          risk: "medium" as DiscoveryRisk,
 
           total_fetched: totalFetched,
           total_companies: companies.length,

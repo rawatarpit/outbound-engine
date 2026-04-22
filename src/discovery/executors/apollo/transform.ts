@@ -10,7 +10,7 @@ import { normalizeDomain, normalizeEmail } from "../../normalizer"
 ========================================================= */
 
 const APOLLO_RISK: DiscoveryRisk =
-  "safe_api" as DiscoveryRisk
+  "low" as DiscoveryRisk
 
 /* =========================================================
    RAW APOLLO TYPES (minimal subset)

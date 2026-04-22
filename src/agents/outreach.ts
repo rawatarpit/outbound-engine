@@ -130,7 +130,6 @@ body
       lead_id: leadMap?.lead_id,
       subject: parsed.subject,
       body: parsed.body,
-      status: "draft",
     });
 
     if (error?.code === "23505") {

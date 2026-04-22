@@ -77,7 +77,7 @@ export const indieHackersExecutor:
         contacts,
         meta: {
           executor: "indiehackers",
-          risk: "moderate_public" as any,
+          risk: "medium" as any,
           total_fetched: rawProfiles.length,
           total_companies: companies.length,
           total_contacts: contacts.length,

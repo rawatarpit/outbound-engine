@@ -39,7 +39,7 @@ export function transformRedditResults(
       domain,
       source: "reddit",
       source_url: post.url ?? sourceUrl,
-      risk: DiscoveryRisk.MODERATE_PUBLIC,
+      risk: "medium" as any,
       confidence: computeConfidence(post),
       intent_score: computeIntentScore(post),
       requires_enrichment: true,
@@ -57,7 +57,7 @@ export function transformRedditResults(
     companies,
     meta: {
       executor: "reddit",
-      risk: DiscoveryRisk.MODERATE_PUBLIC,
+      risk: "medium" as any,
       total_fetched: posts.length,
       total_companies: companies.length,
       source_health: "healthy"
