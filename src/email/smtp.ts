@@ -132,10 +132,17 @@ export async function sendEmail(
        Matches: rpc_increment_domain_metric(p_product text, p_metric text)
     ====================================== */
 
-    await supabase.rpc("rpc_increment_domain_metric", {
+    const { error: sentError } = await supabase.rpc("rpc_increment_domain_metric", {
       p_product: brandId,
       p_metric: "sent"
     })
+
+    if (sentError) {
+      logger.error(
+        { brandId, error: sentError.message },
+        "Failed to increment domain metric (sent)"
+      )
+    }
 
     logger.info(
       `Email sent → ${brandId} → ${info.messageId}`

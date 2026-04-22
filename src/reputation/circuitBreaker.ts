@@ -63,20 +63,20 @@ export async function loadBreakerState() {
 }
 
 async function saveBreakerState(brandId: string, breaker: BrandBreaker) {
-  try {
-    await supabase.from("circuit_breaker_state").upsert(
-      {
-        brand_id: brandId,
-        failures: breaker.failures,
-        last_failure_at: new Date(breaker.lastFailureAt).toISOString(),
-        state: breaker.state,
-        cooldown_until: breaker.cooldownUntil || null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "brand_id" },
-    );
-  } catch (err: any) {
-    logger.error({ err, brandId }, "Failed to persist circuit breaker state");
+  const { error } = await supabase.from("circuit_breaker_state").upsert(
+    {
+      brand_id: brandId,
+      failures: breaker.failures,
+      last_failure_at: new Date(breaker.lastFailureAt).toISOString(),
+      state: breaker.state,
+      cooldown_until: breaker.cooldownUntil || null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "brand_id" },
+  );
+
+  if (error) {
+    logger.error({ brandId, error: error.message }, "Failed to persist circuit breaker state");
   }
 }
 

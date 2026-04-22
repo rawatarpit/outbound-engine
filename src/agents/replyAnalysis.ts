@@ -155,12 +155,19 @@ summary
         const email = senderEmail;
         const domain = email.split("@")[1];
 
-        await supabase.from("suppression_list").insert({
+        const { error: suppressError } = await supabase.from("suppression_list").insert({
           brand_id: brand.id,
           email: email,
           domain: domain,
           reason: "unsubscribe_request",
         });
+
+        if (suppressError) {
+          logger.error(
+            { companyId, email, error: suppressError.message },
+            "Failed to insert suppression record"
+          );
+        }
       }
 
       await updateCompanyStatus(

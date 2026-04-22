@@ -652,19 +652,22 @@ export async function updateSignalSourcePerformance(params: {
   replyDelta?: number;
   bounceDelta?: number;
 }) {
-  try {
-    await supabase.from("signal_source_performance").upsert({
-      source_id: params.sourceId,
-      brand_id: params.brandId,
-      sends: params.sendDelta ?? 0,
-      replies: params.replyDelta ?? 0,
-      bounces: params.bounceDelta ?? 0,
-      last_updated: new Date().toISOString(),
-    }, {
-      onConflict: 'source_id, brand_id',
-    });
-  } catch (err: any) {
-    logger.warn({ err, params }, "Failed to update signal source performance");
+  const { error } = await supabase.from("signal_source_performance").upsert({
+    source_id: params.sourceId,
+    brand_id: params.brandId,
+    sends: params.sendDelta ?? 0,
+    replies: params.replyDelta ?? 0,
+    bounces: params.bounceDelta ?? 0,
+    last_updated: new Date().toISOString(),
+  }, {
+    onConflict: 'source_id, brand_id',
+  });
+
+  if (error) {
+    logger.error(
+      { error: error.message, params },
+      "Failed to update signal source performance"
+    );
   }
 }
 export function assertBrandSendAllowed(brand: BrandProfile) {

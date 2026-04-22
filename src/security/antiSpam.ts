@@ -1,4 +1,7 @@
+import pino from "pino"
 import { supabase } from "../db/supabase"
+
+const logger = pino({ level: "info" })
 
 export async function autoSuppress(
   companyId: string,
@@ -19,15 +22,29 @@ export async function autoSuppress(
       .maybeSingle()
 
     if (!exists) {
-      await supabase.from("suppression_list").insert({
+      const { error: insertError } = await supabase.from("suppression_list").insert({
         company_id: companyId,
         reason: "Unsubscribe"
       })
+
+      if (insertError) {
+        logger.error(
+          { companyId, error: insertError.message },
+          "Failed to insert suppression record"
+        )
+      }
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("companies")
       .update({ status: "closed_lost" })
       .eq("id", companyId)
+
+    if (updateError) {
+      logger.error(
+        { companyId, error: updateError.message },
+        "Failed to update company status"
+      )
+    }
   }
 }

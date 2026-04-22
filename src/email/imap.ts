@@ -128,7 +128,7 @@ async function handleMessage(
     const domain = extractRecipientDomain(raw);
     if (domain) await registerBounce(brand.id, domain);
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("companies")
       .update({
         status: "closed_lost",
@@ -136,6 +136,13 @@ async function handleMessage(
       })
       .eq("id", companyId)
       .eq("brand_id", brand.id);
+
+    if (updateError) {
+      logger.error(
+        { companyId, error: updateError.message },
+        "Failed to update company status (bounce_hard)"
+      );
+    }
 
     await client.messageFlagsAdd(msg.uid, ["\\Seen"]);
     return;
@@ -145,7 +152,7 @@ async function handleMessage(
     const domain = extractRecipientDomain(raw);
     if (domain) await registerBounce(brand.id, domain);
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("companies")
       .update({
         status: "draft_ready",
@@ -153,6 +160,13 @@ async function handleMessage(
       })
       .eq("id", companyId)
       .eq("brand_id", brand.id);
+
+    if (updateError) {
+      logger.error(
+        { companyId, error: updateError.message },
+        "Failed to update company status (bounce_soft)"
+      );
+    }
 
     await client.messageFlagsAdd(msg.uid, ["\\Seen"]);
     return;

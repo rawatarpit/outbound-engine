@@ -1,5 +1,8 @@
+import pino from "pino"
 import { supabase } from "../db/supabase";
 import { FinalEnrichmentOutcome, EnrichmentStatus } from "./types";
+
+const logger = pino({ level: "info" })
 
 export async function persistEnrichmentResult(outcome: FinalEnrichmentOutcome) {
   const { type, entityId, finalConfidence, enrichedData, status } = outcome;
@@ -24,9 +27,16 @@ export async function persistEnrichmentResult(outcome: FinalEnrichmentOutcome) {
     error = response.error;
 
     if (!error && status === EnrichmentStatus.SUCCESS) {
-      await supabase.rpc("rpc_score_lead", {
+      const { error: scoreError } = await supabase.rpc("rpc_score_lead", {
         p_lead_id: entityId,
       });
+
+      if (scoreError) {
+        logger.error(
+          { entityId, error: scoreError.message },
+          "Failed to score lead after enrichment"
+        );
+      }
     }
   }
 

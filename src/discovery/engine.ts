@@ -73,7 +73,7 @@ async function incrementDiscoveryCounter(
 async function triggerCircuitBreaker(
   sourceId: string
 ) {
-  await supabase
+  const { error } = await supabase
     .from("brand_discovery_sources")
     .update({
       is_active: false,
@@ -81,10 +81,17 @@ async function triggerCircuitBreaker(
     })
     .eq("id", sourceId)
 
-  logger.error(
-    { sourceId },
-    "Discovery source disabled via circuit breaker"
-  )
+  if (error) {
+    logger.error(
+      { sourceId, error: error.message },
+      "Failed to disable discovery source via circuit breaker"
+    )
+  } else {
+    logger.error(
+      { sourceId },
+      "Discovery source disabled via circuit breaker"
+    )
+  }
 }
 
 /* =========================================================
@@ -275,11 +282,22 @@ export async function executeSource(
       .filter(Boolean)
 
     if (contactRows.length > 0) {
-      await supabase
+      const { error: contactError } = await supabase
         .from("discovered_contacts")
         .upsert(contactRows, {
           onConflict: "brand_id,email"
         })
+
+      if (contactError) {
+        logger.error(
+          { sourceId: source.id, error: contactError.message, count: contactRows.length },
+          "Failed to insert discovered contacts"
+        )
+        throw new DiscoveryError(
+          `Failed to insert contacts: ${contactError.message}`,
+          "fatal"
+        )
+      }
     }
 
     /* ------------------------------------------

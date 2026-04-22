@@ -94,7 +94,7 @@ export async function moveToDeadLetter(
     const table = entityType === "company" ? "companies" : "leads";
     const statusColumn = entityType === "company" ? "status" : "status";
 
-    await supabase
+    const { error: updateError } = await supabase
       .from(table)
       .update({
         [statusColumn]: "dead_letter",
@@ -102,12 +102,26 @@ export async function moveToDeadLetter(
       })
       .eq("id", entityId);
 
-    await supabase.from("dead_letters").insert({
+    if (updateError) {
+      logger.error(
+        { entityId, entityType, error: updateError.message },
+        "Failed to update entity to dead letter"
+      );
+    }
+
+    const { error: insertError } = await supabase.from("dead_letters").insert({
       entity_type: entityType,
       entity_id: entityId,
       reason,
       failed_at: new Date().toISOString(),
     });
+
+    if (insertError) {
+      logger.error(
+        { entityId, entityType, error: insertError.message },
+        "Failed to insert dead letter record"
+      );
+    }
 
     logger.info({ entityId, entityType, reason }, "Moved to dead letter");
   } catch (err: any) {

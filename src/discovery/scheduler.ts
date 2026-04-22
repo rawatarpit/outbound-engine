@@ -63,13 +63,20 @@ async function incrementBrandDiscoveryCount(brandId: string): Promise<void> {
 
   brandDiscoveryCounts.set(brandId, { count: newCount, date: today });
 
-  await supabase
+  const { error } = await supabase
     .from("brand_profiles")
     .update({
       discovery_count_today: newCount,
       last_discovery_date: today,
     })
     .eq("id", brandId);
+
+  if (error) {
+    logger.error(
+      { brandId, error: error.message },
+      "Failed to update brand discovery count"
+    );
+  }
 }
 
 async function isBrandDiscoveryExhausted(

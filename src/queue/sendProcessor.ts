@@ -279,7 +279,7 @@ export async function processSendQueue(brandId: string) {
          RECORD MESSAGE (UPDATE RESERVED)
       ------------------------------------------ */
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("sent_messages")
         .update({
           status: "sent",
@@ -287,6 +287,13 @@ export async function processSendQueue(brandId: string) {
           sent_at: new Date().toISOString(),
         })
         .eq("message_key", deterministicId);
+
+      if (updateError) {
+        logger.error(
+          { messageKey: deterministicId, error: updateError.message },
+          "Failed to update sent message status"
+        );
+      }
 
       const success = await markLeadContacted(
         outreach.lead_id,

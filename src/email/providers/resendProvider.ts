@@ -60,14 +60,21 @@ export class ResendProvider implements EmailProvider {
         throw new Error(error?.message || "Resend send failed");
       }
 
-      /* =====================================
-         DOMAIN METRIC UPDATE (same RPC)
-      ====================================== */
+/* =====================================
+          DOMAIN METRIC UPDATE (same RPC)
+       ====================================== */
 
-      await supabase.rpc("rpc_increment_domain_metric", {
+      const { error: metricError } = await supabase.rpc("rpc_increment_domain_metric", {
         p_product: brandId,
         p_metric: "sent",
       });
+
+      if (metricError) {
+        logger.error(
+          { brandId, error: metricError.message },
+          "Failed to increment domain metric"
+        );
+      }
 
       logger.info(`Resend email sent → ${brandId} → ${data.id}`);
 
