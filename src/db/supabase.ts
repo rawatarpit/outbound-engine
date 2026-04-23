@@ -190,8 +190,111 @@ export interface OutreachDraft {
   created_at?: string;
   updated_at?: string;
 }
+
+/**
+ * ===============================
+ * SIGNAL TYPES (NEW)
+ * ===============================
+ */
+
+export type SignalType =
+  | "hiring"
+  | "funding"
+  | "launch"
+  | "pain"
+  | "advertising"
+  | "partnership"
+  | "tech_usage"
+  | "growth_activity";
+
+export interface BrandIntent {
+  id: string;
+  brand_id: string;
+  intent: string;
+  signals: SignalType[];
+  priority: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export type QualificationStatus =
+  | "new"
+  | "qualified"
+  | "contacted"
+  | "replied"
+  | "converted"
+  | "disqualified";
+
+export interface Opportunity {
+  id: string;
+  brand_id: string;
+  intent_id: string | null;
+  entity_type: "company" | "person";
+  name: string;
+  domain: string | null;
+  signal: string;
+  sub_signal: string | null;
+  source: string;
+  confidence: number;
+  score: number;
+  qualification_status: QualificationStatus;
+  metadata: Record<string, unknown>;
+  ingested: boolean;
+  dead_letter: boolean;
+  created_at: string;
+}
 /* =========================================================
-   ENRICHMENT TYPES
+    SIGNAL DISCOVERY FUNCTIONS
+========================================================= */
+
+export async function claimBrandIntents(
+  brandId: string,
+  limit: number,
+): Promise<BrandIntent[]> {
+  return safeRpc("rpc_claim_brand_intents", {
+    p_brand_id: brandId,
+    p_limit: limit,
+  });
+}
+
+export async function getActiveOpportunities(
+  brandId: string,
+  limit: number,
+): Promise<Opportunity[]> {
+  return safeRpc("rpc_get_active_opportunities", {
+    p_brand_id: brandId,
+    p_limit: limit,
+  });
+}
+
+export async function qualifyOpportunity(
+  opportunityId: string,
+  status: QualificationStatus,
+): Promise<boolean> {
+  return safeRpc("rpc_qualify_opportunity", {
+    p_opportunity_id: opportunityId,
+    p_status: status,
+  });
+}
+
+export async function ingestOpportunity(
+  brandId: string,
+  opportunity: Partial<Opportunity>,
+): Promise<string | null> {
+  return safeRpc("rpc_ingest_opportunity", {
+    p_brand_id: brandId,
+    p_entity_type: opportunity.entity_type,
+    p_name: opportunity.name,
+    p_domain: opportunity.domain,
+    p_signal: opportunity.signal,
+    p_source: opportunity.source,
+    p_confidence: opportunity.confidence,
+    p_metadata: opportunity.metadata ?? {},
+  });
+}
+
+/* =========================================================
+    ENRICHMENT TYPES
 ========================================================= */
 
 export type EnrichmentState =

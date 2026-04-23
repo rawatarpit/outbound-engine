@@ -9,8 +9,16 @@ import { getExecutor } from "./registry"
 import { normalizeDomain, normalizeEmail } from "./normalizer"
 import { withTimeout, TimeoutError } from "./utils/timeout"
 import { DiscoveryError } from "./errors"
+import {
+  deduplicateCompanies,
+  deduplicateContacts,
+  transformGithubReposToCompanies,
+  isValidDomain,
+  type DeduplicatedCompany,
+  type DeduplicatedContact
+} from "./deduplicator"
 
-import type { DiscoveryResult } from "./types"
+import type { DiscoveryResult, DiscoveryCompany, DiscoveryContact } from "./types"
 
 const logger = pino({ level: "debug" })
 
@@ -184,36 +192,18 @@ export async function executeSource(
       .slice(0, MAX_GLOBAL_ITEMS)
 
 /* ------------------------------------------
-       6. PREPARE COMPANIES (DEDUP BY DOMAIN)
+       6. PREPARE COMPANIES (PROPER DEDUP)
      ------------------------------------------ */
 
-    const domainSeen = new Set<string>()
-    const companyRows: any[] = []
-
-    for (const company of safeCompanies) {
-      if (!company.domain) continue
-      const normalizedDomain = normalizeDomain(company.domain)
-      if (!normalizedDomain) continue
-      if (domainSeen.has(normalizedDomain)) continue
-      domainSeen.add(normalizedDomain)
-      companyRows.push({
-        brand_id: source.brand_id,
-        source_id: source.id,
-        name: company.name ?? null,
-        domain: normalizedDomain,
-        raw_payload: company.raw ?? company,
-        processed: false,
-        ingested: false,
-        risk: company.risk ?? null,
-        confidence: company.confidence ?? null,
-        intent_score: company.intent_score ?? null,
-        requires_enrichment: company.requires_enrichment ?? false
-      })
-    }
+    const companyRows = deduplicateCompanies(
+      safeCompanies as DiscoveryCompany[],
+      source.id,
+      source.brand_id
+    )
 
     if (companyRows.length > 0) {
-      console.log(`[DB] Upserting ${companyRows.length} companies to discovered_companies table...`)
-      console.log(`[DB] Sample row:`, JSON.stringify(companyRows[0], null, 2))
+      console.log(`[DB] Upserting ${companyRows.length} unique companies to discovered_companies table...`)
+
       const { data, error: companyError } = await supabase
         .from("discovered_companies")
         .upsert(companyRows, {
@@ -222,12 +212,14 @@ export async function executeSource(
 
       if (companyError) {
         console.error(`[DB ERROR] Failed to insert companies:`, companyError.message)
-        console.error(`[DB ERROR] Full error:`, JSON.stringify(companyError, null, 2))
         logger.error(
           { sourceId: source.id, error: companyError.message, count: companyRows.length },
           "Failed to insert discovered companies"
         )
-        throw new Error(`Failed to insert companies: ${companyError.message}`)
+        throw new DiscoveryError(
+          `Failed to insert companies: ${companyError.message}`,
+          "fatal"
+        )
       } else {
         console.log(`[DB] Successfully inserted ${companyRows.length} companies`)
       }
@@ -249,41 +241,16 @@ export async function executeSource(
       companyMap.set(row.domain, row.id)
     }
 
-    /* ------------------------------------------
-       8. PREPARE CONTACTS
-    ------------------------------------------ */
+/* ------------------------------------------
+       8. PREPARE CONTACTS (PROPER DEDUP)
+     ------------------------------------------ */
 
-    const emailSeen = new Set<string>()
-    const contactRows: any[] = []
-
-    for (const contact of safeContacts) {
-      const normalizedDomain = normalizeDomain(contact.domain)
-      if (!normalizedDomain) continue
-      const companyId = companyMap.get(normalizedDomain)
-      if (!companyId) continue
-      const normalizedEmail = contact.email ? normalizeEmail(contact.email) : null
-      if (!normalizedEmail) continue
-      if (emailSeen.has(normalizedEmail)) continue
-      emailSeen.add(normalizedEmail)
-      contactRows.push({
-        brand_id: source.brand_id,
-        source_id: source.id,
-        discovered_company_id: companyId,
-        first_name: contact.first_name ?? null,
-        last_name: contact.last_name ?? null,
-        full_name: contact.full_name ?? null,
-        email: normalizedEmail,
-        title: contact.title ?? null,
-        linkedin_url: contact.linkedin_url ?? null,
-        raw_payload: contact.raw ?? contact,
-        processed: false,
-        ingested: false,
-        risk: contact.risk ?? null,
-        confidence: contact.confidence ?? null,
-        intent_score: contact.intent_score ?? null,
-        requires_enrichment: contact.requires_enrichment ?? true
-      })
-    }
+    const contactRows = deduplicateContacts(
+      safeContacts as DiscoveryContact[],
+      source.id,
+      source.brand_id,
+      companyMap
+    )
 
     if (contactRows.length > 0) {
       const { error: contactError } = await supabase

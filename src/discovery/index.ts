@@ -1,32 +1,23 @@
 import pino from "pino"
-import { startDiscoveryScheduler, stopDiscoveryScheduler } from "./scheduler"
-import { startDiscoveryProcessor, stopDiscoveryProcessor } from "./processor"
+import { startSignalScheduler, stopSignalScheduler } from "./signals/scheduler"
 
 const logger = pino({ level: "debug" })
 
 let shuttingDown = false
 
-export async function startDiscoverySystem() {
-  console.error("[DISCOVERY] Starting discovery system")
-  console.error("[DISCOVERY] System will fetch discovery sources from DB and process them continuously")
+export async function startSignalDiscoverySystem() {
+  console.error("[SIGNAL DISCOVERY] Starting signal-driven discovery system")
+  console.error("[SIGNAL DISCOVERY] System will process brand intents and generate opportunities")
 
-  await Promise.all([
-    startDiscoveryScheduler(),
-    startDiscoveryProcessor()
-  ])
+  await startSignalScheduler()
 
-  console.error("[DISCOVERY] Discovery scheduler and processor started")
+  console.error("[SIGNAL DISCOVERY] Signal discovery scheduler started")
 }
 
-// Start if run directly
-startDiscoverySystem().catch((err) => {
-  logger.fatal({ err }, "Discovery system failed to start")
+startSignalDiscoverySystem().catch((err) => {
+  logger.fatal({ err }, "Signal discovery system failed to start")
   process.exit(1)
 })
-
-/* =========================================================
-   GRACEFUL SHUTDOWN
-========================================================= */
 
 async function shutdown() {
   if (shuttingDown) return
@@ -34,8 +25,7 @@ async function shutdown() {
 
   logger.info("Graceful shutdown initiated")
 
-  stopDiscoveryScheduler()
-  stopDiscoveryProcessor()
+  stopSignalScheduler()
 
   setTimeout(() => {
     logger.info("Shutdown complete")
@@ -45,11 +35,3 @@ async function shutdown() {
 
 process.on("SIGINT", shutdown)
 process.on("SIGTERM", shutdown)
-process.on("uncaughtException", async (err) => {
-  logger.fatal({ err }, "Uncaught exception")
-  await shutdown()
-})
-process.on("unhandledRejection", async (err) => {
-  logger.fatal({ err }, "Unhandled rejection")
-  await shutdown()
-})
