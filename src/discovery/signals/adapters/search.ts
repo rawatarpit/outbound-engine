@@ -134,6 +134,7 @@ export class SearchAdapter extends DiscoveryAdapter {
     try {
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=nws`
 
+      // New scrapling syntax - output to temp file
       const command = [
         "scrapling",
         "extract",
@@ -142,7 +143,7 @@ export class SearchAdapter extends DiscoveryAdapter {
         "--css-selector",
         ".g .rc",
         "--solve-cloudflare",
-        "-",
+        "/dev/stdout",
       ].join(" ")
 
       const output = execSync(command, {
