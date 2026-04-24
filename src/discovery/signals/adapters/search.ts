@@ -133,8 +133,9 @@ export class SearchAdapter extends DiscoveryAdapter {
   private async executeScraplingSearch(query: string): Promise<SearchResult[]> {
     try {
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=nws`
+      const tempFile = "/tmp/scrapling_output.json"
 
-      // New scrapling syntax - output to temp file
+      // Use temp file for output
       const command = [
         "scrapling",
         "extract",
@@ -143,15 +144,18 @@ export class SearchAdapter extends DiscoveryAdapter {
         "--css-selector",
         ".g .rc",
         "--solve-cloudflare",
-        "/dev/stdout",
+        tempFile,
       ].join(" ")
 
-      const output = execSync(command, {
+      execSync(command, {
         encoding: "utf-8",
         timeout: 30000,
         maxBuffer: 10 * 1024 * 1024,
       })
 
+      // Read the temp file
+      const output = require("fs").readFileSync(tempFile, "utf-8")
+      
       return this.parseScraplingOutput(output)
     } catch (error) {
       console.warn("[SearchAdapter] Scrapling error:", error instanceof Error ? error.message : String(error))
