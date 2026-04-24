@@ -1,5 +1,5 @@
 import { execSync } from "child_process"
-import { readFileSync, unlinkSync, existsSync } from "fs"
+import { readFileSync, unlinkSync, existsSync, writeFileSync } from "fs"
 import { setTimeout } from "timers/promises"
 import axios from "axios"
 import { DiscoveryAdapter, type AdapterParams, type FetchResult, type AdapterConfig } from "../adapter"
@@ -8,7 +8,10 @@ import type { Opportunity } from "../types"
 import * as cheerio from "cheerio"
 import pino from "pino"
 
-const logger = pino({ level: "debug" })
+const logger = pino({ level: "info" })
+
+// Debug mode - set to "true" to save raw HTML
+const DEBUG_MODE = process.env.SCRAPER_DEBUG === "true"
 
 interface SearchResult {
   title: string
@@ -25,57 +28,51 @@ interface SearchResult {
 
 function normalizeUrl(url: string): string {
   if (!url) return url
-  
-  // Add https://www. if missing
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url
   }
-  
-  // Try both www and non-www versions
   return url
 }
 
 function getUrlVariants(url: string): string[] {
   const variants: string[] = [url]
-  
   try {
     const parsed = new URL(url)
     const hostname = parsed.hostname
-    
-    // Add/remove www
     if (hostname.startsWith("www.")) {
       variants.push("https://" + hostname.slice(4))
     } else {
       variants.push("https://www." + hostname)
     }
   } catch {
-    // Invalid URL, return as-is
+    // Invalid URL
   }
-  
   return [...new Set(variants)]
 }
 
 // =========================================================
-// Robust Scraping Executor
+// ROBUST SCRAPING EXECUTOR - NO SILENT FALLBACK
 // =========================================================
 
 interface ScrapingResult {
   content: string
   success: boolean
+  error?: string
 }
 
 async function runScrapling(url: string, maxAttempts: number = 2): Promise<ScrapingResult> {
   const tempFile = "/tmp/scrapling_output.html"
   
+  logger.info({ stage: "SCRAPER_REQUEST", url, maxAttempts })
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Try URL variants (www vs non-www)
     const urlVariants = getUrlVariants(url)
     
     for (const variant of urlVariants) {
-      console.log("[Scraping] Trying URL:", variant, "attempt:", attempt + 1)
-      
+      logger.info({ stage: "SCRAPER_ATTEMPT", variant, attempt: attempt + 1 })
+
+      // Try stealthy-fetch
       try {
-        // Try stealthy-fetch first
         const command = [
           "scrapling",
           "extract",
@@ -84,28 +81,55 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
           tempFile,
         ].join(" ")
 
-        execSync(command, {
+        const html = execSync(command, {
           encoding: "utf-8",
-          timeout: 15000,
+          timeout: 20000,
           maxBuffer: 10 * 1024 * 1024,
         })
 
         if (existsSync(tempFile)) {
           const content = readFileSync(tempFile, "utf-8")
           try { unlinkSync(tempFile) } catch {}
-          
-          if (content && content.length > 100) {
-            console.log("[Scraping] Success with stealthy-fetch")
-            return { success: true, content }
+
+          // DETECT BLOCKED/BOT RESPONSES
+          if (!content || content.length < 1000) {
+            logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant, length: content?.length })
+            continue
           }
+
+          if (content.includes("captcha") || content.includes("unusual traffic") || content.includes("Robot Check")) {
+            logger.error({ stage: "BOT_DETECTED", url: variant, preview: content.slice(0, 200) })
+            continue
+          }
+
+          // DEBUG MODE: save raw HTML
+          if (DEBUG_MODE) {
+            const debugFile = `/tmp/scraper-debug-${Date.now()}.html`
+            writeFileSync(debugFile, content)
+            logger.info({ stage: "DEBUG_SAVED", file: debugFile })
+          }
+
+          logger.info({ 
+            stage: "SCRAPER_SUCCESS", 
+            url: variant, 
+            htmlLength: content.length,
+            preview: content.slice(0, 300)
+          })
+
+          return { success: true, content }
         }
       } catch (error) {
-        console.log("[Scraping] stealthy-fetch failed:", error instanceof Error ? error.message : String(error))
+        logger.error({ 
+          stage: "SCRAPER_ERROR", 
+          url: variant, 
+          attempt: attempt + 1,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        })
       }
 
       // Fallback to regular fetch
       try {
-        console.log("[Scraping] Trying fallback fetch...")
         const command = [
           "scrapling",
           "extract",
@@ -116,41 +140,53 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
 
         execSync(command, {
           encoding: "utf-8",
-          timeout: 15000,
+          timeout: 20000,
           maxBuffer: 10 * 1024 * 1024,
         })
 
         if (existsSync(tempFile)) {
           const content = readFileSync(tempFile, "utf-8")
           try { unlinkSync(tempFile) } catch {}
-          
-          if (content && content.length > 100) {
-            console.log("[Scraping] Success with fallback fetch")
-            return { success: true, content }
+
+          if (!content || content.length < 1000) {
+            logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant })
+            continue
           }
+
+          if (DEBUG_MODE) {
+            const debugFile = `/tmp/scraper-debug-${Date.now()}.html`
+            writeFileSync(debugFile, content)
+          }
+
+          logger.info({ stage: "SCRAPER_SUCCESS_FALLBACK", url: variant, htmlLength: content.length })
+          return { success: true, content }
         }
       } catch (error) {
-        console.log("[Scraping] fallback fetch failed:", error instanceof Error ? error.message : String(error))
+        logger.error({ stage: "SCRAPER_FALLBACK_ERROR", url: variant, error: error.message })
       }
 
-      // Clean up temp file
+      // Clean up
       if (existsSync(tempFile)) {
         try { unlinkSync(tempFile) } catch {}
       }
 
-      // Small delay between attempts
+      // Add delay between attempts
       if (attempt < maxAttempts - 1) {
-        await setTimeout(1000)
+        const delay = 2000 + Math.random() * 1000
+        logger.info({ stage: "SCRAPER_DELAY", delayMs: delay })
+        await setTimeout(delay)
       }
     }
   }
 
-  console.log("[Scraping] All attempts failed, returning failure")
-  return { success: false, content: "" }
+  // NO SILENT FALLBACK - throw error
+  const errorMsg = "All scraper attempts failed"
+  logger.error({ stage: "SCRAPER_EXHAUSTED", url, message: errorMsg })
+  return { success: false, content: "", error: errorMsg }
 }
 
 // =========================================================
-// Extract meaningful text from HTML
+// Extract text from HTML
 // =========================================================
 
 function extractTextFromHtml(html: string, maxLength: number = 500): string {
@@ -158,73 +194,46 @@ function extractTextFromHtml(html: string, maxLength: number = 500): string {
   
   try {
     const $ = cheerio.load(html)
-    
-    // Remove scripts, styles, nav, footer
     $("script, style, nav, footer, header, aside").remove()
     
-    // Get text from main content areas
     const text = $("main, article, .content, .hero, .main, body")
       .first()
       .text()
       .slice(0, maxLength)
     
-    if (text && text.trim().length > 20) {
-      return text.trim()
-    }
-    
-    // Fallback: get body text
-    return $("body").text().slice(0, maxLength).trim()
+    return text.trim() || $("body").text().slice(0, maxLength).trim()
   } catch {
     return ""
   }
 }
 
-// =========================================================
-// Extract page title
-// =========================================================
-
 function extractTitleFromHtml(html: string): string {
   if (!html) return "Unknown"
-  
   try {
     const $ = cheerio.load(html)
-    
-    // Try multiple selectors
-    const title = 
-      $("h1").first().text().trim() ||
-      $("title").text().trim() ||
-      $("meta[property='og:title']").attr("content") ||
-      ""
-    
-    return title.slice(0, 100) || "Unknown"
+    return $("h1").first().text().trim() || $("title").text().trim() || "Unknown"
   } catch {
     return "Unknown"
   }
 }
 
 // =========================================================
-// Zenserp API Client
+// Zenserp API
 // =========================================================
 
-async function fetchWithZenserp(
-  query: string,
-  apiKey: string,
-  maxResults: number = 20,
-): Promise<SearchResult[]> {
+async function fetchWithZenserp(query: string, apiKey: string, maxResults: number = 20): Promise<SearchResult[]> {
+  logger.info({ stage: "ZENSERP_REQUEST", query })
+
   try {
     const response = await axios.get("https://api.zenserp.com/search", {
-      params: {
-        q: query,
-        tbm: "nws",
-        size: maxResults,
-      },
-      headers: {
-        "X-API-Key": apiKey,
-      },
+      params: { q: query, tbm: "nws", size: maxResults },
+      headers: { "X-API-Key": apiKey },
       timeout: 10000,
     })
 
     const results = response.data?.organic ?? response.data?.results ?? []
+    logger.info({ stage: "ZENSERP_RESPONSE", count: results.length })
+    
     return results.map((item: any, idx: number) => ({
       title: item.title ?? "",
       link: item.url ?? item.link ?? "",
@@ -232,40 +241,40 @@ async function fetchWithZenserp(
       position: idx + 1,
     }))
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      logger.error({ error: error.message }, "Zenserp API error")
-    }
+    logger.error({ stage: "ZENSERP_ERROR", error: error.message })
     return []
   }
 }
 
 // =========================================================
-// Mock data fallback (NEVER fail)
+// Mock data - ONLY if explicitly allowed
 // =========================================================
 
-function getMockSearchResults(query: string): SearchResult[] {
+function getMockSearchResultsIfAllowed(query: string): SearchResult[] | null {
+  // Only allow mock fallback if explicitly enabled
+  if (process.env.ALLOW_MOCK !== "true") {
+    logger.warn({ stage: "FALLBACK_BLOCKED", reason: "ALLOW_MOCK not set to true" })
+    return null
+  }
+  
+  logger.warn({ stage: "FALLBACK_TRIGGERED", reason: "All scrapers failed", using: "mock_data" })
   return [
-    { title: "Sales Automation Platform", link: "https://example-sales.com", snippet: "Leading sales automation for B2B companies" },
-    { title: "Outbound Lead Generation", link: "https://example-leads.com", snippet: "Generate qualified leads at scale" },
-    { title: "AI Sales Assistant", link: "https://example-ai.com", snippet: "Personalized outreach powered by AI" },
+    { title: "Sales Automation Platform", link: "https://example-sales.com", snippet: "Leading sales automation for B2B" },
+    { title: "Outbound Lead Generation", link: "https://example-leads.com", snippet: "Generate qualified leads" },
+    { title: "AI Sales Assistant", link: "https://example-ai.com", snippet: "Personalized outreach with AI" },
   ]
 }
 
 // =========================================================
-// SearchAdapter
+// SearchAdapter - NO SILENT FALLBACKS
 // =========================================================
 
 export class SearchAdapter extends DiscoveryAdapter {
   source = "google_search"
   supportedSignals = [
-    SignalType.HIRING,
-    SignalType.PAIN,
-    SignalType.GROWTH_ACTIVITY,
-    SignalType.TECH_USAGE,
-    SignalType.FUNDING,
-    SignalType.LAUNCH,
-    SignalType.ADVERTISING,
-    SignalType.PARTNERSHIP,
+    SignalType.HIRING, SignalType.PAIN, SignalType.GROWTH_ACTIVITY,
+    SignalType.TECH_USAGE, SignalType.FUNDING, SignalType.LAUNCH,
+    SignalType.ADVERTISING, SignalType.PARTNERSHIP,
   ]
 
   private brandId: string | null = null
@@ -277,112 +286,105 @@ export class SearchAdapter extends DiscoveryAdapter {
 
   async fetch(params: AdapterParams): Promise<FetchResult> {
     const results = await this.executeSearch(params.query, params.signal)
+    
     return {
       raw: results,
       metadata: {
         searchQuery: params.query,
         resultCount: results.length,
         brandId: this.brandId,
+        source: results.length > 0 ? "scrapling" : "none",
       },
     }
   }
 
   protected async executeSearch(query: string, signal: string): Promise<SearchResult[]> {
+    logger.info({ stage: "EXECUTE_SEARCH_START", query, signal })
+
     let searchResults: SearchResult[] = []
 
     // Step 1: Try Zenserp if API key configured
     const zenserpKey = this.config.zenserpApiKey
     if (zenserpKey) {
-      console.log("[SearchAdapter] Using Zenserp API")
       searchResults = await fetchWithZenserp(query, zenserpKey)
       if (searchResults.length > 0) {
-        console.log("[SearchAdapter] Zenserp found", searchResults.length, "results")
+        logger.info({ stage: "ZENSERP_SUCCESS", count: searchResults.length })
       }
     }
 
-    // Step 2: Try built-in scraper (get URLs from Google)
+    // Step 2: Try built-in scraper to get URLs
     if (searchResults.length === 0) {
-      console.log("[SearchAdapter] Trying built-in scraper")
+      logger.info({ stage: "BUILTIN_SCRAPER_START" })
       searchResults = await this.executeBuiltInSearch(query)
       if (searchResults.length > 0) {
-        console.log("[SearchAdapter] Built-in scraper found", searchResults.length, "results")
+        logger.info({ stage: "BUILTIN_SCRAPER_SUCCESS", count: searchResults.length })
       }
     }
 
-    // Step 3: Enhance results with Scrapling (scrape each URL found)
+    // Step 3: ONLY use Scrapling - enhance/add data
     if (searchResults.length > 0) {
-      const urls = searchResults.map(r => r.link).filter(Boolean)
+      const urls = searchResults.filter(r => r.link && r.link.startsWith("http")).map(r => r.link)
+      
       if (urls.length > 0) {
-        console.log("[SearchAdapter] Enhancing", urls.length, "URLs with Scrapling...")
-        const enhancedResults = await this.scrapeUrls(urls)
-        if (enhancedResults.length > 0) {
-          console.log("[SearchAdapter] Scrapling found", enhancedResults.length, "enhanced results")
-          return enhancedResults
+        logger.info({ stage: "SCRAPING_URLS", count: urls.length })
+        
+        const scrapedResults = await this.scrapeUrls(urls)
+        
+        if (scrapedResults.length > 0) {
+          logger.info({ stage: "SCRAPING_SUCCESS", count: scrapedResults.length })
+          return scrapedResults
+        } else {
+          logger.warn({ stage: "SCRAPING_FAILED", message: "No results from scrapling, using original" })
         }
       }
     }
 
-    // Step 4: NEVER fail - return mock data
-    console.log("[SearchAdapter] Using fallback mock data")
-    return getMockSearchResults(query)
+    // Step 4: Only allow mock if explicitly enabled
+    const mockResults = getMockSearchResultsIfAllowed(query)
+    if (mockResults) {
+      return mockResults
+    }
+
+    // NO SILENT FALLBACK - return empty results (caller should handle)
+    logger.error({ stage: "NO_RESULTS", query, message: "All sources exhausted and mock not enabled" })
+    return []
   }
 
   private async scrapeUrls(urls: string[]): Promise<SearchResult[]> {
     const results: SearchResult[] = []
     const maxConcurrent = 3
 
-    // Process URLs with concurrency control
     for (let i = 0; i < urls.length; i += maxConcurrent) {
       const batch = urls.slice(i, i + maxConcurrent)
       
       const promises = batch.map(async (url: string, idx: number) => {
-        try {
-          const result = await runScrapling(url, 2)
+        const result = await runScrapling(url, 2)
+        
+        if (result.success && result.content) {
+          const title = extractTitleFromHtml(result.content)
+          const text = extractTextFromHtml(result.content)
           
-          if (result.success && result.content) {
-            const title = extractTitleFromHtml(result.content)
-            const text = extractTextFromHtml(result.content)
-            
-            return {
-              title,
-              link: url,
-              snippet: text.slice(0, 200),
-              extracted_text: text,
-              position: i + idx + 1,
-            }
-          } else {
-            // Fallback: return URL as minimal result
-            console.log("[SearchAdapter] Scraping failed for", url, "- using fallback")
-            return {
-              title: url.replace(/^https?:\/\//, "").split("/")[0],
-              link: url,
-              snippet: "",
-              position: i + idx + 1,
-            }
-          }
-        } catch (error) {
-          console.log("[SearchAdapter] Error scraping", url, error)
-          // Return minimal fallback
           return {
-            title: url.replace(/^https?:\/\//, "").split("/")[0],
+            title,
             link: url,
-            snippet: "",
+            snippet: text.slice(0, 200),
+            extracted_text: text,
             position: i + idx + 1,
           }
+        } else {
+          // Log failure but don't fallback silently
+          logger.error({ stage: "SCRAPE_URL_FAILED", url, error: result.error })
+          return null
         }
       })
 
       const batchResults = await Promise.all(promises)
-      results.push(...batchResults)
+      const validResults = batchResults.filter(Boolean)
+      results.push(...validResults)
     }
 
+    logger.info({ stage: "SCRAPING_COMPLETE", extractedCount: results.length })
     return results
-  }
-
-  private extractUrlsFromQuery(query: string): string[] {
-    const urlRegex = /https?:\/\/[^\s]+/g
-    const matches = query.match(urlRegex)
-    return matches ? [...new Set(matches)] : []
   }
 
   private async executeBuiltInSearch(query: string): Promise<SearchResult[]> {
@@ -400,7 +402,6 @@ export class SearchAdapter extends DiscoveryAdapter {
       const $ = cheerio.load(response.data)
       const results: SearchResult[] = []
 
-      // Try multiple selectors
       const selectors = ["div.Snrnice", "div.g", "div.llcl", "div.NiLAwe"]
       
       for (const sel of selectors) {
@@ -425,7 +426,7 @@ export class SearchAdapter extends DiscoveryAdapter {
 
       return results.slice(0, 20)
     } catch (error) {
-      console.warn("[SearchAdapter] Built-in scraper error:", error)
+      logger.error({ stage: "BUILTIN_SCRAPER_ERROR", error: error.message })
       return []
     }
   }
@@ -441,6 +442,8 @@ export class SearchAdapter extends DiscoveryAdapter {
 
   normalize(raw: unknown[]): Opportunity[] {
     const items = raw as SearchResult[]
+
+    logger.info({ stage: "NORMALIZE_START", count: items.length })
 
     return items
       .filter(item => item.title || item.link)
@@ -466,23 +469,18 @@ export class SearchAdapter extends DiscoveryAdapter {
   }
 
   private extractCompanyName(title: string, domain?: string): string {
-    if (domain) {
-      return domain.replace(/^www\./, "").replace(/\..*/, "")
-    }
+    if (domain) return domain.replace(/^www\./, "").replace(/\..*/, "")
     return title.replace(/[-|–]\s*.*$/, "").trim() || "Unknown"
   }
 
   private inferSignal(title: string, snippet: string): string {
     const text = (title + " " + snippet).toLowerCase()
-
     if (text.includes("hiring") || text.includes("job")) return SignalType.HIRING
     if (text.includes("funding") || text.includes("raised")) return SignalType.FUNDING
     if (text.includes("launch") || text.includes("released")) return SignalType.LAUNCH
     if (text.includes("pain") || text.includes("problem") || text.includes("struggle")) return SignalType.PAIN
     if (text.includes("growth") || text.includes("scale")) return SignalType.GROWTH_ACTIVITY
     if (text.includes("partner")) return SignalType.PARTNERSHIP
-    if (text.includes("advert")) return SignalType.ADVERTISING
-
     return SignalType.PAIN
   }
 
@@ -499,20 +497,10 @@ export class SearchAdapter extends DiscoveryAdapter {
   private calculateConfidence(item: SearchResult): number {
     let confidence = 0.5
     const text = (item.title + " " + item.snippet).toLowerCase()
-
-    if (item.date && (item.date.includes("2026") || item.date.includes("2025"))) {
-      confidence += 0.15
-    }
-
+    if (item.date && (item.date.includes("2026") || item.date.includes("2025"))) confidence += 0.15
     const urgency = ["need", "looking for", "want", "trying to", "best", "recommend"]
-    if (urgency.some(p => text.includes(p))) {
-      confidence += 0.15
-    }
-
-    if (text.includes("vs ") || text.includes("alternativ")) {
-      confidence += 0.1
-    }
-
+    if (urgency.some(p => text.includes(p))) confidence += 0.15
+    if (text.includes("vs ") || text.includes("alternativ")) confidence += 0.1
     return Math.min(1, confidence)
   }
 }
