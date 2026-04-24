@@ -3,6 +3,7 @@ import axios from "axios"
 import { DiscoveryAdapter, type AdapterParams, type FetchResult, type AdapterConfig } from "../adapter"
 import { SignalType } from "../types"
 import type { Opportunity } from "../types"
+import * as cheerio from "cheerio"
 
 interface SearchResult {
   title: string
@@ -39,7 +40,7 @@ export class SearchAdapter extends DiscoveryAdapter {
     query: string,
     signal: string,
   ): Promise<SearchResult[]> {
-    // Try Scrapling first (free, no API key needed)
+    // Try Python scrapling first (if installed)
     const scraplingResults = await this.executeScraplingSearch(query)
     if (scraplingResults.length > 0) {
       console.log(`[SearchAdapter] Scrapling found ${scraplingResults.length} results`)
@@ -53,8 +54,80 @@ export class SearchAdapter extends DiscoveryAdapter {
       return this.executeZenserpSearch(query, zenserpKey)
     }
 
-    console.log("[SearchAdapter] No results from Scrapling or Zenserp")
+    // Last fallback to built-in scraper
+    const builtInResults = await this.executeBuiltInSearch(query)
+    if (builtInResults.length > 0) {
+      console.log(`[SearchAdapter] Built-in scraper found ${builtInResults.length} results`)
+      return builtInResults
+    }
+
+    console.log("[SearchAdapter] No results from any source")
     return []
+  }
+
+  private async executeBuiltInSearch(query: string): Promise<SearchResult[]> {
+    try {
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=nws`
+      
+      const response = await axios.get(searchUrl, {
+        timeout: 15000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      })
+
+      const $ = cheerio.load(response.data)
+      const results: SearchResult[] = []
+
+      $("div.Snrnice").each((_, el) => {
+        const container = $(el)
+        const title = container.find("div.MBeuO").text().trim()
+        const link = container.find("a").attr("href") || ""
+        const snippet = container.find("div.GIRe9").text().trim()
+
+        if (title && link) {
+          results.push({
+            title,
+            link: link.startsWith("/url?") ? this.extractUrlFromRedirect(link) : link,
+            snippet,
+            position: results.length + 1,
+          })
+        }
+      })
+
+      if (results.length === 0) {
+        $("div.g").each((_, el) => {
+          const container = $(el)
+          const title = container.find("h3").text().trim()
+          const link = container.find("a").attr("href") || ""
+          const snippet = container.find("div.VwiC3").text().trim()
+
+          if (title && link) {
+            results.push({
+              title,
+              link: link.startsWith("/url?") ? this.extractUrlFromRedirect(link) : link,
+              snippet: snippet.slice(0, 200),
+              position: results.length + 1,
+            })
+          }
+        })
+      }
+
+      return results.slice(0, 20)
+    } catch (error) {
+      console.warn("[SearchAdapter] Built-in scraper error:", error instanceof Error ? error.message : String(error))
+      return []
+    }
+  }
+
+  private extractUrlFromRedirect(url: string): string {
+    try {
+      const urlObj = new URL(url)
+      return urlObj.searchParams.get("q") || url
+    } catch {
+      return url
+    }
   }
 
   private async executeScraplingSearch(query: string): Promise<SearchResult[]> {
