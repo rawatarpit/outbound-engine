@@ -396,7 +396,6 @@ async function fetchHackerNewsSearch(query: string): Promise<SearchResult[]> {
 
     const $ = cheerio.load(result.content)
     
-    // Parse HN Algolia results
     $("div.story, div.item, article").each((idx, el) => {
       const container = $(el)
       const title = container.find("a.story__title, a.title, span.title").text().trim()
@@ -421,6 +420,136 @@ async function fetchHackerNewsSearch(query: string): Promise<SearchResult[]> {
     logger.info({ stage: "HN_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "HN_ERROR", query, error: error instanceof Error ? error.message : String(error) })
+  }
+
+  return results
+}
+
+// =========================================================
+// INDIE HACKERS SEARCH
+// =========================================================
+
+async function fetchIndieHackersSearch(query: string): Promise<SearchResult[]> {
+  const results: SearchResult[] = []
+  const encodedQuery = encodeURIComponent(query)
+  
+  const searchUrl = `https://www.indiehackers.com/search?q=${encodedQuery}`
+  
+  logger.info({ stage: "INDIE_HACKERS_REQUEST", query, url: searchUrl })
+
+  try {
+    const result = await runScrapling(searchUrl, 2)
+    
+    if (!result.success || !result.content) {
+      logger.error({ stage: "INDIE_HACKERS_FAILED", query, error: result.error })
+      return []
+    }
+
+    const $ = cheerio.load(result.content)
+    
+    $("div.post, article.post, div.hacker-story, div.post-card").each((idx, el) => {
+      const container = $(el)
+      const title = container.find("h3, h2, .post-title, .title").first().text().trim()
+      const link = container.find("a.title, a.post-link, h3 a, h2 a").first().attr("href")
+      const author = container.find("span.author, .user-name, by").first().text().trim()
+      const snippet = container.find("p.excerpt, .content, .post-body").first().text().trim().slice(0, 200)
+      const timestamp = container.find("time, .date, .timestamp").first().text().trim()
+      
+      if (title) {
+        results.push({
+          title: title.slice(0, 200),
+          link: normalizeUrl(link || ""),
+          snippet: snippet.slice(0, 300),
+          author: author || "anonymous",
+          timestamp,
+          position: idx + 1,
+        })
+      }
+    })
+
+    if (results.length === 0) {
+      $("a[href*='/post/']").each((idx, el) => {
+        const link = $(el).attr("href")
+        const title = $(el).text().trim()
+        
+        if (link && title && link.length > 5) {
+          results.push({
+            title: title.slice(0, 200),
+            link: normalizeUrl(link),
+            snippet: "",
+            timestamp: "",
+            position: idx + 1,
+          })
+        }
+      })
+    }
+
+    logger.info({ stage: "INDIE_HACKERS_SUCCESS", query, count: results.length })
+  } catch (error) {
+    logger.error({ stage: "INDIE_HACKERS_ERROR", query, error: error instanceof Error ? error.message : String(error) })
+  }
+
+  return results
+}
+
+// =========================================================
+// PRODUCT HUNT SEARCH (NO API)
+// =========================================================
+
+async function fetchProductHuntSearch(query: string): Promise<SearchResult[]> {
+  const results: SearchResult[] = []
+  const encodedQuery = encodeURIComponent(query)
+  
+  const searchUrl = `https://www.producthunt.com/search?q=${encodedQuery}`
+  
+  logger.info({ stage: "PRODUCT_HUNT_REQUEST", query, url: searchUrl })
+
+  try {
+    const result = await runScrapling(searchUrl, 2)
+    
+    if (!result.success || !result.content) {
+      logger.error({ stage: "PRODUCT_HUNT_FAILED", query, error: result.error })
+      return []
+    }
+
+    const $ = cheerio.load(result.content)
+    
+    $("div.product, article.product, div.product-item, div.post-item").each((idx, el) => {
+      const container = $(el)
+      const title = container.find("h3, h2, .product-name, .title").first().text().trim()
+      const link = container.find("a.product-link, a[href*='/products/']").first().attr("href")
+      const tagline = container.find("p.tagline, .tagline, .description").first().text().trim()
+      const votes = container.find("span.votes, .vote-count, [data-test*=votes]").first().text().trim()
+      
+      if (title) {
+        results.push({
+          title: title.slice(0, 200),
+          link: normalizeUrl(link || ""),
+          snippet: (tagline || "").slice(0, 300) + (votes ? ` | ${votes} votes` : ""),
+          position: idx + 1,
+        })
+      }
+    })
+
+    if (results.length === 0) {
+      $("a[href*='/products/']").each((idx, el) => {
+        const link = $(el).attr("href")
+        const title = $(el).text().trim()
+        
+        if (link && title && title.length > 2) {
+          results.push({
+            title: title.slice(0, 200),
+            link: normalizeUrl(link),
+            snippet: "",
+            position: idx + 1,
+          })
+        }
+      })
+    }
+
+    logger.info({ stage: "PRODUCT_HUNT_SUCCESS", query, count: results.length })
+  } catch (error) {
+    logger.error({ stage: "PRODUCT_HUNT_ERROR", query, error: error instanceof Error ? error.message : String(error) })
   }
 
   return results
@@ -478,6 +607,7 @@ export class SearchAdapter extends DiscoveryAdapter {
   }
 
   protected async executeSearch(query: string, signal: string): Promise<SearchResult[]> {
+    logger.info({ stage: "ADAPTER_EXECUTION", adapter: "search", query, signal })
     logger.info({ stage: "EXECUTE_SEARCH_START", query, signal })
 
     const allResults: SearchResult[] = []
@@ -515,8 +645,8 @@ export class SearchAdapter extends DiscoveryAdapter {
       }
     }
 
-    // Step 3: If no Reddit results, try Hacker News
-    if (allResults.length === 0) {
+    // Step 3: If not enough results, try Hacker News
+    if (allResults.length < 10) {
       logger.info({ stage: "TRYING_HACKER_NEWS", query })
       
       const hnResults = await fetchHackerNewsSearch(query)
@@ -533,25 +663,61 @@ export class SearchAdapter extends DiscoveryAdapter {
       }
     }
 
-    // Step 4: If we have results, return them
+    // Step 4: Try Indie Hackers
+    if (allResults.length < 10) {
+      logger.info({ stage: "TRYING_INDIE_HACKERS", query })
+      
+      const ihResults = await fetchIndieHackersSearch(query)
+      
+      if (ihResults.length > 0) {
+        allResults.push(...ihResults)
+        
+        for (const r of ihResults) {
+          const intent = classifyIntent(r.title, r.snippet)
+          intentCounts[intent as keyof typeof intentCounts]++
+        }
+        
+        logger.info({ stage: "INDIE_HACKERS_SUCCESS", count: ihResults.length })
+      }
+    }
+
+    // Step 5: Try Product Hunt
+    if (allResults.length < 10) {
+      logger.info({ stage: "TRYING_PRODUCT_HUNT", query })
+      
+      const phResults = await fetchProductHuntSearch(query)
+      
+      if (phResults.length > 0) {
+        allResults.push(...phResults)
+        
+        for (const r of phResults) {
+          const intent = classifyIntent(r.title, r.snippet)
+          intentCounts[intent as keyof typeof intentCounts]++
+        }
+        
+        logger.info({ stage: "PRODUCT_HUNT_SUCCESS", count: phResults.length })
+      }
+    }
+
+    // Step 6: If we have results, return them
     if (allResults.length > 0) {
       logger.info({ 
         stage: "SEARCH_SUCCESS", 
         totalResults: allResults.length,
         intentCounts,
-        sources: { reddit: "reddit", hn: "hacker_news" },
+        sources: ["reddit", "hn", "indiehackers", "producthunt"],
       })
       return allResults.slice(0, 50)
     }
 
-    // Step 5: Allow mock only if explicitly enabled
+    // Step 7: Allow mock only if explicitly enabled
     const mockResults = getMockSearchResultsIfAllowed(query)
     if (mockResults) {
       return mockResults
     }
 
     // NO SILENT FALLBACK - return empty
-    logger.error({ stage: "NO_RESULTS", query, source: "reddit" })
+    logger.error({ stage: "NO_RESULTS", query, sources: "all" })
     return []
   }
 
