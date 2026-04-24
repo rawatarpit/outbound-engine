@@ -619,7 +619,7 @@ export class SearchAdapter extends DiscoveryAdapter {
   }
 
   protected async executeSearch(query: string, signal: string): Promise<SearchResult[]> {
-    logger.info({ stage: "ADAPTER_EXECUTION", adapter: "search", query, signal })
+    logger.info({ stage: "ADAPTER_EXECUTION", adapter: "community_search", query, signal })
     logger.info({ stage: "EXECUTE_SEARCH_START", query, signal })
 
     const allResults: SearchResult[] = []
@@ -629,85 +629,69 @@ export class SearchAdapter extends DiscoveryAdapter {
     const queryVariations = simplifyQuery(query)
     logger.info({ stage: "QUERY_VARIATIONS", count: queryVariations.length, variations: queryVariations.map(v => v.query) })
 
-    // Step 2: Fetch from Reddit for each variation
+    // Try each source for each query variation - in order of likelihood to work
     for (let i = 0; i < queryVariations.length; i++) {
       const variation = queryVariations[i]
       
-      logger.info({ stage: "FETCH_REDDIT", query: variation.query, intent: variation.intent, index: i })
-      
-      const redditResults = await fetchRedditSearch(variation.query)
-      
-      // Add delay between requests
-      if (i < queryVariations.length - 1) {
-        const delay = 2000 + Math.random() * 1000
-        logger.info({ stage: "REQUEST_DELAY", delayMs: delay })
-        await setTimeout(delay)
-      }
-
-      if (redditResults.length > 0) {
-        allResults.push(...redditResults)
-        
-        // Count intents
-        for (const r of redditResults) {
-          const intent = classifyIntent(r.title, r.snippet)
-          intentCounts[intent as keyof typeof intentCounts]++
-        }
-        
-        logger.info({ stage: "REDDIT_RESULTS", query: variation.query, count: redditResults.length })
-      }
-    }
-
-    // Step 3: If not enough results, try Hacker News
-    if (allResults.length < 10) {
-      logger.info({ stage: "TRYING_HACKER_NEWS", query })
-      
-      const hnResults = await fetchHackerNewsSearch(query)
+      // A. Try Hacker News FIRST (most likely to work)
+      logger.info({ stage: "FETCH_HN", query: variation.query, index: i })
+      const hnResults = await fetchHackerNewsSearch(variation.query)
       
       if (hnResults.length > 0) {
         allResults.push(...hnResults)
-        
         for (const r of hnResults) {
           const intent = classifyIntent(r.title, r.snippet)
           intentCounts[intent as keyof typeof intentCounts]++
         }
-        
-        logger.info({ stage: "HN_SUCCESS", count: hnResults.length })
+        logger.info({ stage: "HN_RESULTS", query: variation.query, count: hnResults.length })
       }
-    }
 
-    // Step 4: Try Indie Hackers
-    if (allResults.length < 10) {
-      logger.info({ stage: "TRYING_INDIE_HACKERS", query })
-      
-      const ihResults = await fetchIndieHackersSearch(query)
+      // B. Try Indie Hackers
+      logger.info({ stage: "FETCH_INDIE_HACKERS", query: variation.query })
+      const ihResults = await fetchIndieHackersSearch(variation.query)
       
       if (ihResults.length > 0) {
         allResults.push(...ihResults)
-        
         for (const r of ihResults) {
           const intent = classifyIntent(r.title, r.snippet)
           intentCounts[intent as keyof typeof intentCounts]++
         }
-        
-        logger.info({ stage: "INDIE_HACKERS_SUCCESS", count: ihResults.length })
+        logger.info({ stage: "INDIE_HACKERS_RESULTS", query: variation.query, count: ihResults.length })
       }
-    }
 
-    // Step 5: Try Product Hunt
-    if (allResults.length < 10) {
-      logger.info({ stage: "TRYING_PRODUCT_HUNT", query })
-      
-      const phResults = await fetchProductHuntSearch(query)
+      // C. Try Product Hunt
+      logger.info({ stage: "FETCH_PRODUCT_HUNT", query: variation.query })
+      const phResults = await fetchProductHuntSearch(variation.query)
       
       if (phResults.length > 0) {
         allResults.push(...phResults)
-        
         for (const r of phResults) {
           const intent = classifyIntent(r.title, r.snippet)
           intentCounts[intent as keyof typeof intentCounts]++
         }
+        logger.info({ stage: "PRODUCT_HUNT_RESULTS", query: variation.query, count: phResults.length })
+      }
+
+      // D. Try Reddit (last - often blocked)
+      if (allResults.length < 5) {
+        logger.info({ stage: "FETCH_REDDIT", query: variation.query, intent: variation.intent })
+        const redditResults = await fetchRedditSearch(variation.query)
         
-        logger.info({ stage: "PRODUCT_HUNT_SUCCESS", count: phResults.length })
+        if (redditResults.length > 0) {
+          allResults.push(...redditResults)
+          for (const r of redditResults) {
+            const intent = classifyIntent(r.title, r.snippet)
+            intentCounts[intent as keyof typeof intentCounts]++
+          }
+          logger.info({ stage: "REDDIT_RESULTS", query: variation.query, count: redditResults.length })
+        }
+      }
+      
+      // Delay between queries
+      if (i < queryVariations.length - 1 && allResults.length < 10) {
+        const delay = 2000 + Math.random() * 1000
+        logger.info({ stage: "REQUEST_DELAY", delayMs: delay })
+        await setTimeout(delay)
       }
     }
 
@@ -717,7 +701,7 @@ export class SearchAdapter extends DiscoveryAdapter {
         stage: "SEARCH_SUCCESS", 
         totalResults: allResults.length,
         intentCounts,
-        sources: ["reddit", "hn", "indiehackers", "producthunt"],
+        sources: ["hn", "indiehackers", "producthunt", "reddit"],
       })
       return allResults.slice(0, 50)
     }
