@@ -148,7 +148,11 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
           try { unlinkSync(tempFile) } catch {}
 
           if (!content || content.length < 500) {
-            logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant })
+            logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant, length: content?.length })
+            // Check if it's a block page
+            if (content && (content.includes("blocked") || content.includes("限") || content.includes("403") || content.includes("Forbidden"))) {
+              logger.error({ stage: "SCRAPER_BLOCKED", url: variant })
+            }
             continue
           }
 
@@ -232,24 +236,28 @@ function simplifyQuery(originalQuery: string): QueryVariation[] {
     primaryIntent = "tool_search"
   }
   
-  // Extract core topic keywords
-  const stopWords = ["hiring", "sales", "representative", "b2b", "founder", "startup", "looking", "for", "need", "help", "with", "the", "best"]
+  // Extract relevant keywords (keep sales, outbound, pipeline, lead, prospect)
+  const stopWords = ["hiring", "looking", "for", "need", "help", "with", "the", "best", "agencies", "companies", "doing", "$5k", "$100k", "mrr", "site:twitter.com", "site:linkedin.com"]
   const words = originalQuery.split(/[\s,]+/)
     .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ""))
-    .filter(w => w.length > 2 && !stopWords.includes(w))
+    .filter(w => w.length > 3 && !stopWords.includes(w))
   
-  const coreTopic = words[0] || originalQuery.split(" ")[0]?.toLowerCase() || ""
+  // Keep core keywords like "outbound", "sales", "pipeline", "leads"
+  const relevant = words.filter(w => ["outbound", "sales", "pipeline", "leads", "lead", "prospect", "b2b", "saas", "cold", "email", "calling"].includes(w))
+  const coreTopic = relevant[0] || words[0] || "sales"
   
-  // Generate variations
+  // Generate variations that make sense for outbound sales
   const variationTemplates = [
-    { template: coreTopic, intent: primaryIntent },
-    { template: coreTopic + " problems", intent: "pain" },
-    { template: coreTopic + " struggling", intent: "pain" },
-    { template: coreTopic + " help needed", intent: "pain" },
-    { template: "hiring " + coreTopic + " expert", intent: "hiring" },
-    { template: coreTopic + " alternatives", intent: "tool_search" },
-    { template: "best " + coreTopic + " software", intent: "tool_search" },
-    { template: coreTopic + " review", intent: "tool_search" },
+    { template: "struggling with outbound sales", intent: "pain" },
+    { template: "can't generate leads", intent: "pain" },
+    { template: "outbound sales problems", intent: "pain" },
+    { template: "need help with pipeline", intent: "pain" },
+    { template: "hiring sales rep", intent: "hiring" },
+    { template: "sales pipeline issues", intent: "pain" },
+    { template: "cold calling help", intent: "pain" },
+    { template: "best outbound tools", intent: "tool_search" },
+    { template: "lead generation SaaS", intent: "tool_search" },
+    { template: "outbound software", intent: "tool_search" },
   ]
   
   for (const v of variationTemplates) {
