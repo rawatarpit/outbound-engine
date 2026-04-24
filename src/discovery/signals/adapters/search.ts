@@ -321,7 +321,7 @@ export class SearchAdapter extends DiscoveryAdapter {
       }
     }
 
-    // Step 3: ONLY use Scrapling - enhance/add data
+    // Step 3: Use Scrapling to enhance URLs
     if (searchResults.length > 0) {
       const urls = searchResults.filter(r => r.link && r.link.startsWith("http")).map(r => r.link)
       
@@ -334,19 +334,53 @@ export class SearchAdapter extends DiscoveryAdapter {
           logger.info({ stage: "SCRAPING_SUCCESS", count: scrapedResults.length })
           return scrapedResults
         } else {
-          logger.warn({ stage: "SCRAPING_FAILED", message: "No results from scrapling, using original" })
+          logger.warn({ stage: "SCRAPING_FAILED", message: "Using original search results" })
+          // Return original search results if Scrapling failed
+          return searchResults
         }
       }
     }
 
-    // Step 4: Only allow mock if explicitly enabled
+    // Step 4: Built-in scraper returned 0 results (likely blocked by Google)
+    // Try Scrapling directly on common domains
+    if (searchResults.length === 0) {
+      logger.warn({ stage: "BUILTIN_BLOCKED", message: "Trying direct Scrapling" })
+      
+      // Extract potential domains from query
+      const keywords = query.split(/[\s,]+/).filter(w => w.length > 3 && !w.includes("http")).slice(0, 5)
+      const directUrls: string[] = []
+      
+      for (let i = 0; i < keywords.length; i++) {
+        const k = keywords[i]
+        // Try common SaaS pattern
+        if (!k.includes(".") && !k.includes(":")) {
+          directUrls.push("https://" + k.toLowerCase().replace(/[^a-z0-9]/g, "") + ".com")
+        }
+      }
+      
+      if (directUrls.length > 0) {
+        logger.info({ stage: "SCRAPING_DIRECT", urls: directUrls.length })
+        const scrapedResults = await this.scrapeUrls(directUrls)
+        if (scrapedResults.length > 0) {
+          logger.info({ stage: "SCRAPING_DIRECT_SUCCESS", count: scrapedResults.length })
+          return scrapedResults
+        }
+      }
+    }
+
+    // Step 5: If we have any search results, return them
+    if (searchResults.length > 0) {
+      return searchResults
+    }
+
+    // Step 6: Allow mock only if explicitly enabled
     const mockResults = getMockSearchResultsIfAllowed(query)
     if (mockResults) {
       return mockResults
     }
 
-    // NO SILENT FALLBACK - return empty results (caller should handle)
-    logger.error({ stage: "NO_RESULTS", query, message: "All sources exhausted and mock not enabled" })
+    // Return empty - don't fail silently
+    logger.error({ stage: "NO_RESULTS", query })
     return []
   }
 
