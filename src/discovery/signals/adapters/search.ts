@@ -135,15 +135,12 @@ export class SearchAdapter extends DiscoveryAdapter {
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=nws`
       const tempFile = "/tmp/scrapling_output.json"
 
-      // Use temp file for output
+      // Correct CLI format: scrapling extract stealthy-fetch "URL" OUTPUT_FILE
       const command = [
         "scrapling",
         "extract",
         "stealthy-fetch",
         `"${searchUrl}"`,
-        "--css-selector",
-        ".g .rc",
-        "--solve-cloudflare",
         tempFile,
       ].join(" ")
 
