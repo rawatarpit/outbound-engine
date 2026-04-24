@@ -10,8 +10,18 @@ import pino from "pino"
 
 const logger = pino({ level: "info" })
 
-// Debug mode - set to "true" to save raw HTML
 const DEBUG_MODE = process.env.SCRAPER_DEBUG === "true"
+
+interface RedditPost {
+  title: string
+  url: string
+  subreddit: string
+  author: string
+  timestamp: string
+  snippet: string
+  score?: number
+  comments?: number
+}
 
 interface SearchResult {
   title: string
@@ -20,11 +30,22 @@ interface SearchResult {
   extracted_text?: string
   position?: number
   date?: string
+  subreddit?: string
+  author?: string
+  timestamp?: string
 }
 
-// =========================================================
-// URL Normalization
-// =========================================================
+interface OpportunityResult {
+  source: string
+  query: string
+  title: string
+  url: string
+  snippet: string
+  intent_type: string
+  score: number
+  subreddit?: string
+  author?: string
+}
 
 function normalizeUrl(url: string): string {
   if (!url) return url
@@ -44,15 +65,9 @@ function getUrlVariants(url: string): string[] {
     } else {
       variants.push("https://www." + hostname)
     }
-  } catch {
-    // Invalid URL
-  }
+  } catch {}
   return [...new Set(variants)]
 }
-
-// =========================================================
-// ROBUST SCRAPING EXECUTOR - NO SILENT FALLBACK
-// =========================================================
 
 interface ScrapingResult {
   content: string
@@ -71,7 +86,6 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
     for (const variant of urlVariants) {
       logger.info({ stage: "SCRAPER_ATTEMPT", variant, attempt: attempt + 1 })
 
-      // Try stealthy-fetch
       try {
         const command = [
           "scrapling",
@@ -91,44 +105,29 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
           const content = readFileSync(tempFile, "utf-8")
           try { unlinkSync(tempFile) } catch {}
 
-          // DETECT BLOCKED/BOT RESPONSES
-          if (!content || content.length < 1000) {
+          if (!content || content.length < 500) {
             logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant, length: content?.length })
             continue
           }
 
           if (content.includes("captcha") || content.includes("unusual traffic") || content.includes("Robot Check")) {
-            logger.error({ stage: "BOT_DETECTED", url: variant, preview: content.slice(0, 200) })
+            logger.error({ stage: "BOT_DETECTED", url: variant })
             continue
           }
 
-          // DEBUG MODE: save raw HTML
           if (DEBUG_MODE) {
             const debugFile = `/tmp/scraper-debug-${Date.now()}.html`
             writeFileSync(debugFile, content)
             logger.info({ stage: "DEBUG_SAVED", file: debugFile })
           }
 
-          logger.info({ 
-            stage: "SCRAPER_SUCCESS", 
-            url: variant, 
-            htmlLength: content.length,
-            preview: content.slice(0, 300)
-          })
-
+          logger.info({ stage: "SCRAPER_SUCCESS", url: variant, htmlLength: content.length })
           return { success: true, content }
         }
       } catch (error) {
-        logger.error({ 
-          stage: "SCRAPER_ERROR", 
-          url: variant, 
-          attempt: attempt + 1,
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined
-        })
+        logger.error({ stage: "SCRAPER_ERROR", url: variant, error: error instanceof Error ? error.message : String(error) })
       }
 
-      // Fallback to regular fetch
       try {
         const command = [
           "scrapling",
@@ -148,7 +147,7 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
           const content = readFileSync(tempFile, "utf-8")
           try { unlinkSync(tempFile) } catch {}
 
-          if (!content || content.length < 1000) {
+          if (!content || content.length < 500) {
             logger.error({ stage: "SCRAPER_EMPTY_RESPONSE", url: variant })
             continue
           }
@@ -165,12 +164,10 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
         logger.error({ stage: "SCRAPER_FALLBACK_ERROR", url: variant, error: error.message })
       }
 
-      // Clean up
       if (existsSync(tempFile)) {
         try { unlinkSync(tempFile) } catch {}
       }
 
-      // Add delay between attempts
       if (attempt < maxAttempts - 1) {
         const delay = 2000 + Math.random() * 1000
         logger.info({ stage: "SCRAPER_DELAY", delayMs: delay })
@@ -179,15 +176,10 @@ async function runScrapling(url: string, maxAttempts: number = 2): Promise<Scrap
     }
   }
 
-  // NO SILENT FALLBACK - throw error
   const errorMsg = "All scraper attempts failed"
   logger.error({ stage: "SCRAPER_EXHAUSTED", url, message: errorMsg })
   return { success: false, content: "", error: errorMsg }
 }
-
-// =========================================================
-// Extract text from HTML
-// =========================================================
 
 function extractTextFromHtml(html: string, maxLength: number = 500): string {
   if (!html) return ""
@@ -218,46 +210,233 @@ function extractTitleFromHtml(html: string): string {
 }
 
 // =========================================================
-// Zenserp API
+// QUERY SIMPLIFICATION - Convert complex queries to short variations
 // =========================================================
 
-async function fetchWithZenserp(query: string, apiKey: string, maxResults: number = 20): Promise<SearchResult[]> {
-  logger.info({ stage: "ZENSERP_REQUEST", query })
+interface QueryVariation {
+  query: string
+  intent: string
+}
 
-  try {
-    const response = await axios.get("https://api.zenserp.com/search", {
-      params: { q: query, tbm: "nws", size: maxResults },
-      headers: { "X-API-Key": apiKey },
-      timeout: 10000,
-    })
+function simplifyQuery(originalQuery: string): QueryVariation[] {
+  const variations: QueryVariation[] = []
+  const lower = originalQuery.toLowerCase()
+  
+  // Determine primary intent
+  let primaryIntent = "tool_search"
+  if (lower.includes("hire") || lower.includes("recruit") || lower.includes("sales rep") || lower.includes("bd")) {
+    primaryIntent = "hiring"
+  } else if (lower.includes("problem") || lower.includes("struggle") || lower.includes("can't") || lower.includes("fail")) {
+    primaryIntent = "pain"
+  } else if (lower.includes("automate") || lower.includes("tool") || lower.includes("software")) {
+    primaryIntent = "tool_search"
+  }
+  
+  // Extract core topic keywords
+  const stopWords = ["hiring", "sales", "representative", "b2b", "founder", "startup", "looking", "for", "need", "help", "with", "the", "best"]
+  const words = originalQuery.split(/[\s,]+/)
+    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ""))
+    .filter(w => w.length > 2 && !stopWords.includes(w))
+  
+  const coreTopic = words[0] || originalQuery.split(" ")[0]?.toLowerCase() || ""
+  
+  // Generate variations
+  const variationTemplates = [
+    { template: coreTopic, intent: primaryIntent },
+    { template: coreTopic + " problems", intent: "pain" },
+    { template: coreTopic + " struggling", intent: "pain" },
+    { template: coreTopic + " help needed", intent: "pain" },
+    { template: "hiring " + coreTopic + " expert", intent: "hiring" },
+    { template: coreTopic + " alternatives", intent: "tool_search" },
+    { template: "best " + coreTopic + " software", intent: "tool_search" },
+    { template: coreTopic + " review", intent: "tool_search" },
+  ]
+  
+  for (const v of variationTemplates) {
+    if (v.template && v.template.length > 2) {
+      variations.push({ query: v.template, intent: v.intent })
+    }
+  }
+  
+  // Dedupe and limit
+  const uniqueQueries = [...new Set(variations.map(v => v.query))].slice(0, 10)
+  return uniqueQueries.map(q => ({
+    query: q,
+    intent: variations.find(v => v.query === q)?.intent || primaryIntent,
+  }))
+}
 
-    const results = response.data?.organic ?? response.data?.results ?? []
-    logger.info({ stage: "ZENSERP_RESPONSE", count: results.length })
-    
-    return results.map((item: any, idx: number) => ({
-      title: item.title ?? "",
-      link: item.url ?? item.link ?? "",
-      snippet: item.description ?? item.snippet ?? "",
-      position: idx + 1,
-    }))
-  } catch (error) {
-    logger.error({ stage: "ZENSERP_ERROR", error: error.message })
-    return []
+// =========================================================
+// INTENT CLASSIFICATION
+// =========================================================
+
+function classifyIntent(title: string, snippet: string): string {
+  const text = (title + " " + snippet).toLowerCase()
+  
+  const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "fail", "stuck", "issue", "error", "broken", "need help", "how to", "why is", "doesn't work"]
+  const hiringKeywords = ["looking for", "hire", "need someone", "recruit", "job opening", "hiring", "vacancy", "position", "candidate"]
+  const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review", "tool", "software", "platform"]
+  
+  for (const kw of hiringKeywords) {
+    if (text.includes(kw)) return "hiring"
+  }
+  for (const kw of painKeywords) {
+    if (text.includes(kw)) return "pain"
+  }
+  for (const kw of toolSearchKeywords) {
+    if (text.includes(kw)) return "tool_search"
+  }
+  
+  return "discussion"
+}
+
+function calculateIntentScore(intentType: string): number {
+  switch (intentType) {
+    case "pain": return 0.85
+    case "hiring": return 0.8
+    case "tool_search": return 0.6
+    case "discussion": return 0.3
+    default: return 0.5
   }
 }
 
 // =========================================================
-// Mock data - ONLY if explicitly allowed
+// REDDIT SEARCH
+// =========================================================
+
+async function fetchRedditSearch(query: string): Promise<SearchResult[]> {
+  const results: SearchResult[] = []
+  const encodedQuery = encodeURIComponent(query)
+  
+  // Try old.reddit.com search
+  const searchUrl = `https://old.reddit.com/search?q=${encodedQuery}&sort=new`
+  
+  logger.info({ stage: "REDDIT_REQUEST", query, url: searchUrl })
+
+  try {
+    const result = await runScrapling(searchUrl, 2)
+    
+    if (!result.success || !result.content) {
+      logger.error({ stage: "REDDIT_FAILED", query, error: result.error })
+      return []
+    }
+
+    const $ = cheerio.load(result.content)
+    
+    // Parse Reddit search results - old.reddit format
+    $("div.search-result").each((idx, el) => {
+      const container = $(el)
+      const title = container.find("a.search-title").text().trim() || container.find("a.title").text().trim()
+      const link = container.find("a.search-title").attr("href") || container.find("a.title").attr("href")
+      const subreddit = container.find("a.subreddit").text().trim() || container.find("span.domain").text().trim()
+      const author = container.find("a.author").text().trim()
+      const timestamp = container.find("time").attr("datetime") || ""
+      const snippet = container.find("p.excerpt").text().trim() || container.find("div.md").text().trim().slice(0, 200)
+      
+      if (title && link) {
+        results.push({
+          title: title.slice(0, 200),
+          link: normalizeUrl(link),
+          snippet: snippet.slice(0, 300),
+          subreddit: subreddit || "unknown",
+          author: author || "anonymous",
+          timestamp,
+          position: idx + 1,
+        })
+      }
+    })
+
+    // Fallback: try generic parsing if above fails
+    if (results.length === 0) {
+      $("a[href*='/r/']").each((idx, el) => {
+        const link = $(el).attr("href")
+        const title = $(el).text().trim()
+        
+        if (link && title && link.includes("/comments/")) {
+          results.push({
+            title: title.slice(0, 200),
+            link: normalizeUrl(link),
+            snippet: "",
+            subreddit: link.split("/r/")[1]?.split("/")[0] || "unknown",
+            author: "",
+            timestamp: "",
+            position: idx + 1,
+          })
+        }
+      })
+    }
+
+    logger.info({ stage: "REDDIT_SUCCESS", query, count: results.length })
+  } catch (error) {
+    logger.error({ stage: "REDDIT_ERROR", query, error: error instanceof Error ? error.message : String(error) })
+  }
+
+  return results
+}
+
+// =========================================================
+// HACKER NEWS SEARCH
+// =========================================================
+
+async function fetchHackerNewsSearch(query: string): Promise<SearchResult[]> {
+  const results: SearchResult[] = []
+  const encodedQuery = encodeURIComponent(query)
+  
+  const searchUrl = `https://hn.algolia.com/?q=${encodedQuery}&sort=new&tags=story`
+  
+  logger.info({ stage: "HN_REQUEST", query, url: searchUrl })
+
+  try {
+    const result = await runScrapling(searchUrl, 2)
+    
+    if (!result.success || !result.content) {
+      logger.error({ stage: "HN_FAILED", query, error: result.error })
+      return []
+    }
+
+    const $ = cheerio.load(result.content)
+    
+    // Parse HN Algolia results
+    $("div.story, div.item, article").each((idx, el) => {
+      const container = $(el)
+      const title = container.find("a.story__title, a.title, span.title").text().trim()
+      const link = container.find("a.story__title, a.title").attr("href")
+      const url = container.find("a.story__url, span.url a, a.url").text().trim()
+      const author = container.find("span.author, a.author").text().trim()
+      const timestamp = container.find("span.date, time").text().trim()
+      const points = container.find("span.counter, span.points").text().trim()
+      
+      if (title) {
+        results.push({
+          title: title.slice(0, 200),
+          link: normalizeUrl(link || url || ""),
+          snippet: `Points: ${points || 0} | by ${author || "unknown"} | ${timestamp || ""}`.slice(0, 200),
+          author: author || "anonymous",
+          timestamp,
+          position: idx + 1,
+        })
+      }
+    })
+
+    logger.info({ stage: "HN_SUCCESS", query, count: results.length })
+  } catch (error) {
+    logger.error({ stage: "HN_ERROR", query, error: error instanceof Error ? error.message : String(error) })
+  }
+
+  return results
+}
+
+// =========================================================
+// MOCK DATA - ONLY IF EXPLICITLY ALLOWED
 // =========================================================
 
 function getMockSearchResultsIfAllowed(query: string): SearchResult[] | null {
-  // Only allow mock fallback if explicitly enabled
   if (process.env.ALLOW_MOCK !== "true") {
     logger.warn({ stage: "FALLBACK_BLOCKED", reason: "ALLOW_MOCK not set to true" })
     return null
   }
   
-  logger.warn({ stage: "FALLBACK_TRIGGERED", reason: "All scrapers failed", using: "mock_data" })
+  logger.warn({ stage: "FALLBACK_TRIGGERED", using: "mock_data" })
   return [
     { title: "Sales Automation Platform", link: "https://example-sales.com", snippet: "Leading sales automation for B2B" },
     { title: "Outbound Lead Generation", link: "https://example-leads.com", snippet: "Generate qualified leads" },
@@ -266,11 +445,11 @@ function getMockSearchResultsIfAllowed(query: string): SearchResult[] | null {
 }
 
 // =========================================================
-// SearchAdapter - NO SILENT FALLBACKS
+// SearchAdapter - REDDIT + HN PRIMARY SOURCES
 // =========================================================
 
 export class SearchAdapter extends DiscoveryAdapter {
-  source = "google_search"
+  source = "reddit"
   supportedSignals = [
     SignalType.HIRING, SignalType.PAIN, SignalType.GROWTH_ACTIVITY,
     SignalType.TECH_USAGE, SignalType.FUNDING, SignalType.LAUNCH,
@@ -293,7 +472,7 @@ export class SearchAdapter extends DiscoveryAdapter {
         searchQuery: params.query,
         resultCount: results.length,
         brandId: this.brandId,
-        source: results.length > 0 ? "scrapling" : "none",
+        source: results.length > 0 ? "reddit" : "none",
       },
     }
   }
@@ -301,177 +480,79 @@ export class SearchAdapter extends DiscoveryAdapter {
   protected async executeSearch(query: string, signal: string): Promise<SearchResult[]> {
     logger.info({ stage: "EXECUTE_SEARCH_START", query, signal })
 
-    let searchResults: SearchResult[] = []
+    const allResults: SearchResult[] = []
+    const intentCounts = { pain: 0, hiring: 0, tool_search: 0, discussion: 0 }
 
-    // Step 1: Try Zenserp if API key configured
-    const zenserpKey = this.config.zenserpApiKey
-    if (zenserpKey) {
-      searchResults = await fetchWithZenserp(query, zenserpKey)
-      if (searchResults.length > 0) {
-        logger.info({ stage: "ZENSERP_SUCCESS", count: searchResults.length })
-      }
-    }
+    // Step 1: Generate simplified query variations
+    const queryVariations = simplifyQuery(query)
+    logger.info({ stage: "QUERY_VARIATIONS", count: queryVariations.length, variations: queryVariations.map(v => v.query) })
 
-    // Step 2: Try built-in scraper to get URLs
-    if (searchResults.length === 0) {
-      logger.info({ stage: "BUILTIN_SCRAPER_START" })
-      searchResults = await this.executeBuiltInSearch(query)
-      if (searchResults.length > 0) {
-        logger.info({ stage: "BUILTIN_SCRAPER_SUCCESS", count: searchResults.length })
-      }
-    }
-
-    // Step 3: Use Scrapling to enhance URLs
-    if (searchResults.length > 0) {
-      const urls = searchResults.filter(r => r.link && r.link.startsWith("http")).map(r => r.link)
+    // Step 2: Fetch from Reddit for each variation
+    for (let i = 0; i < queryVariations.length; i++) {
+      const variation = queryVariations[i]
       
-      if (urls.length > 0) {
-        logger.info({ stage: "SCRAPING_URLS", count: urls.length })
+      logger.info({ stage: "FETCH_REDDIT", query: variation.query, intent: variation.intent, index: i })
+      
+      const redditResults = await fetchRedditSearch(variation.query)
+      
+      // Add delay between requests
+      if (i < queryVariations.length - 1) {
+        const delay = 2000 + Math.random() * 1000
+        logger.info({ stage: "REQUEST_DELAY", delayMs: delay })
+        await setTimeout(delay)
+      }
+
+      if (redditResults.length > 0) {
+        allResults.push(...redditResults)
         
-        const scrapedResults = await this.scrapeUrls(urls)
+        // Count intents
+        for (const r of redditResults) {
+          const intent = classifyIntent(r.title, r.snippet)
+          intentCounts[intent as keyof typeof intentCounts]++
+        }
         
-        if (scrapedResults.length > 0) {
-          logger.info({ stage: "SCRAPING_SUCCESS", count: scrapedResults.length })
-          return scrapedResults
-        } else {
-          logger.warn({ stage: "SCRAPING_FAILED", message: "Using original search results" })
-          // Return original search results if Scrapling failed
-          return searchResults
-        }
+        logger.info({ stage: "REDDIT_RESULTS", query: variation.query, count: redditResults.length })
       }
     }
 
-    // Step 4: Built-in scraper returned 0 results (likely blocked by Google)
-    // Try Scrapling directly on common domains
-    if (searchResults.length === 0) {
-      logger.warn({ stage: "BUILTIN_BLOCKED", message: "Trying direct Scrapling" })
+    // Step 3: If no Reddit results, try Hacker News
+    if (allResults.length === 0) {
+      logger.info({ stage: "TRYING_HACKER_NEWS", query })
       
-      // Extract potential domains from query
-      const keywords = query.split(/[\s,]+/).filter(w => w.length > 3 && !w.includes("http")).slice(0, 5)
-      const directUrls: string[] = []
+      const hnResults = await fetchHackerNewsSearch(query)
       
-      for (let i = 0; i < keywords.length; i++) {
-        const k = keywords[i]
-        // Try common SaaS pattern
-        if (!k.includes(".") && !k.includes(":")) {
-          directUrls.push("https://" + k.toLowerCase().replace(/[^a-z0-9]/g, "") + ".com")
+      if (hnResults.length > 0) {
+        allResults.push(...hnResults)
+        
+        for (const r of hnResults) {
+          const intent = classifyIntent(r.title, r.snippet)
+          intentCounts[intent as keyof typeof intentCounts]++
         }
-      }
-      
-      if (directUrls.length > 0) {
-        logger.info({ stage: "SCRAPING_DIRECT", urls: directUrls.length })
-        const scrapedResults = await this.scrapeUrls(directUrls)
-        if (scrapedResults.length > 0) {
-          logger.info({ stage: "SCRAPING_DIRECT_SUCCESS", count: scrapedResults.length })
-          return scrapedResults
-        }
+        
+        logger.info({ stage: "HN_SUCCESS", count: hnResults.length })
       }
     }
 
-    // Step 5: If we have any search results, return them
-    if (searchResults.length > 0) {
-      return searchResults
+    // Step 4: If we have results, return them
+    if (allResults.length > 0) {
+      logger.info({ 
+        stage: "SEARCH_SUCCESS", 
+        totalResults: allResults.length,
+        intentCounts,
+        sources: { reddit: "reddit", hn: "hacker_news" },
+      })
+      return allResults.slice(0, 50)
     }
 
-    // Step 6: Allow mock only if explicitly enabled
+    // Step 5: Allow mock only if explicitly enabled
     const mockResults = getMockSearchResultsIfAllowed(query)
     if (mockResults) {
       return mockResults
     }
 
-    // Return empty - don't fail silently
-    logger.error({ stage: "NO_RESULTS", query })
+    // NO SILENT FALLBACK - return empty
+    logger.error({ stage: "NO_RESULTS", query, source: "reddit" })
     return []
-  }
-
-  private async scrapeUrls(urls: string[]): Promise<SearchResult[]> {
-    const results: SearchResult[] = []
-    const maxConcurrent = 3
-
-    for (let i = 0; i < urls.length; i += maxConcurrent) {
-      const batch = urls.slice(i, i + maxConcurrent)
-      
-      const promises = batch.map(async (url: string, idx: number) => {
-        const result = await runScrapling(url, 2)
-        
-        if (result.success && result.content) {
-          const title = extractTitleFromHtml(result.content)
-          const text = extractTextFromHtml(result.content)
-          
-          return {
-            title,
-            link: url,
-            snippet: text.slice(0, 200),
-            extracted_text: text,
-            position: i + idx + 1,
-          }
-        } else {
-          // Log failure but don't fallback silently
-          logger.error({ stage: "SCRAPE_URL_FAILED", url, error: result.error })
-          return null
-        }
-      })
-
-      const batchResults = await Promise.all(promises)
-      const validResults = batchResults.filter(Boolean)
-      results.push(...validResults)
-    }
-
-    logger.info({ stage: "SCRAPING_COMPLETE", extractedCount: results.length })
-    return results
-  }
-
-  private async executeBuiltInSearch(query: string): Promise<SearchResult[]> {
-    try {
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=nws`
-      
-      const response = await axios.get(searchUrl, {
-        timeout: 15000,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      })
-
-      const $ = cheerio.load(response.data)
-      const results: SearchResult[] = []
-
-      const selectors = ["div.Snrnice", "div.g", "div.llcl", "div.NiLAwe"]
-      
-      for (const sel of selectors) {
-        $(sel).each((_, el) => {
-          const container = $(el)
-          const title = container.find("h3, div.MBeuO, div.yfBeLX").first().text().trim()
-          const link = container.find("a").attr("href") || ""
-          const snippet = container.find("div.GIRe9, div.yfAn51, span.aCGNS").first().text().trim()
-
-          if (title && link) {
-            results.push({
-              title,
-              link: link.startsWith("/url?") ? this.extractUrlFromRedirect(link) : link,
-              snippet: snippet.slice(0, 200),
-              position: results.length + 1,
-            })
-          }
-        })
-        
-        if (results.length > 0) break
-      }
-
-      return results.slice(0, 20)
-    } catch (error) {
-      logger.error({ stage: "BUILTIN_SCRAPER_ERROR", error: error.message })
-      return []
-    }
-  }
-
-  private extractUrlFromRedirect(url: string): string {
-    try {
-      const urlObj = new URL(url)
-      return urlObj.searchParams.get("q") || url
-    } catch {
-      return url
-    }
   }
 
   normalize(raw: unknown[]): Opportunity[] {
@@ -482,24 +563,38 @@ export class SearchAdapter extends DiscoveryAdapter {
     return items
       .filter(item => item.title || item.link)
       .map(item => {
-        const domain = this.extractDomain(item.link)
-        const signal = this.inferSignal(item.title, item.snippet)
+        const intentType = classifyIntent(item.title, item.snippet)
+        const score = calculateIntentScore(intentType)
+        const domain = this.extractDomainFromUrl(item.link)
+        const signal = this.mapIntentToSignal(intentType)
 
         return this.createOpportunity({
           name: this.extractCompanyName(item.title, domain),
           domain,
           source: this.source,
           signal,
-          sub_signal: this.extractSubSignal(item.snippet),
-          confidence: this.calculateConfidence(item),
+          sub_signal: intentType,
+          confidence: Math.round(score * 100),
           metadata: {
             title: item.title,
             snippet: item.snippet,
             url: item.link,
             extracted_text: item.extracted_text,
+            subreddit: item.subreddit,
+            author: item.author,
+            intent_type: intentType,
           },
         })
       })
+  }
+
+  private mapIntentToSignal(intentType: string): string {
+    switch (intentType) {
+      case "pain": return SignalType.PAIN
+      case "hiring": return SignalType.HIRING
+      case "tool_search": return SignalType.TECH_USAGE
+      default: return SignalType.PAIN
+    }
   }
 
   private extractCompanyName(title: string, domain?: string): string {
@@ -507,35 +602,14 @@ export class SearchAdapter extends DiscoveryAdapter {
     return title.replace(/[-|–]\s*.*$/, "").trim() || "Unknown"
   }
 
-  private inferSignal(title: string, snippet: string): string {
-    const text = (title + " " + snippet).toLowerCase()
-    if (text.includes("hiring") || text.includes("job")) return SignalType.HIRING
-    if (text.includes("funding") || text.includes("raised")) return SignalType.FUNDING
-    if (text.includes("launch") || text.includes("released")) return SignalType.LAUNCH
-    if (text.includes("pain") || text.includes("problem") || text.includes("struggle")) return SignalType.PAIN
-    if (text.includes("growth") || text.includes("scale")) return SignalType.GROWTH_ACTIVITY
-    if (text.includes("partner")) return SignalType.PARTNERSHIP
-    return SignalType.PAIN
-  }
-
-  private extractSubSignal(snippet: string): string | undefined {
-    const lower = snippet.toLowerCase()
-    if (lower.includes("cold call")) return "cold_calling"
-    if (lower.includes("email")) return "email_outreach"
-    if (lower.includes("lead gen")) return "lead_generation"
-    if (lower.includes("sales")) return "sales"
-    if (lower.includes("marketing")) return "marketing"
-    return undefined
-  }
-
-  private calculateConfidence(item: SearchResult): number {
-    let confidence = 0.5
-    const text = (item.title + " " + item.snippet).toLowerCase()
-    if (item.date && (item.date.includes("2026") || item.date.includes("2025"))) confidence += 0.15
-    const urgency = ["need", "looking for", "want", "trying to", "best", "recommend"]
-    if (urgency.some(p => text.includes(p))) confidence += 0.15
-    if (text.includes("vs ") || text.includes("alternativ")) confidence += 0.1
-    return Math.min(1, confidence)
+  private extractDomainFromUrl(url: string): string {
+    if (!url) return ""
+    try {
+      const parsed = new URL(url)
+      return parsed.hostname.replace(/^www\./, "")
+    } catch {
+      return ""
+    }
   }
 }
 
