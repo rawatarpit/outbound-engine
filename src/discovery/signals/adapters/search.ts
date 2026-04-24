@@ -585,6 +585,10 @@ export class SearchAdapter extends DiscoveryAdapter {
     SignalType.ADVERTISING, SignalType.PARTNERSHIP,
   ]
 
+  override supports(signal: SignalType): boolean {
+    return true // Scrapling searches all communities, signal type doesn't matter
+  }
+
   private brandId: string | null = null
 
   constructor(config: AdapterConfig = {}, brandId?: string) {
