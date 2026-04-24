@@ -297,27 +297,28 @@ export class SearchAdapter extends DiscoveryAdapter {
       searchResults = await fetchWithZenserp(query, zenserpKey)
       if (searchResults.length > 0) {
         console.log("[SearchAdapter] Zenserp found", searchResults.length, "results")
-        return searchResults
       }
     }
 
-    // Step 2: Try built-in scraper
-    console.log("[SearchAdapter] Trying built-in scraper")
-    searchResults = await this.executeBuiltInSearch(query)
-    if (searchResults.length > 0) {
-      console.log("[SearchAdapter] Built-in scraper found", searchResults.length, "results")
-      return searchResults
+    // Step 2: Try built-in scraper (get URLs from Google)
+    if (searchResults.length === 0) {
+      console.log("[SearchAdapter] Trying built-in scraper")
+      searchResults = await this.executeBuiltInSearch(query)
+      if (searchResults.length > 0) {
+        console.log("[SearchAdapter] Built-in scraper found", searchResults.length, "results")
+      }
     }
 
-    // Step 3: Extract URLs from query and scrape with Scrapling
-    const urls = this.extractUrlsFromQuery(query)
-    if (urls.length > 0) {
-      console.log("[SearchAdapter] Scraping", urls.length, "URLs with Scrapling")
-      
-      const scrapedResults = await this.scrapeUrls(urls)
-      if (scrapedResults.length > 0) {
-        console.log("[SearchAdapter] Scrapling found", scrapedResults.length, "results")
-        return scrapedResults
+    // Step 3: Enhance results with Scrapling (scrape each URL found)
+    if (searchResults.length > 0) {
+      const urls = searchResults.map(r => r.link).filter(Boolean)
+      if (urls.length > 0) {
+        console.log("[SearchAdapter] Enhancing", urls.length, "URLs with Scrapling...")
+        const enhancedResults = await this.scrapeUrls(urls)
+        if (enhancedResults.length > 0) {
+          console.log("[SearchAdapter] Scrapling found", enhancedResults.length, "enhanced results")
+          return enhancedResults
+        }
       }
     }
 

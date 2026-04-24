@@ -151,8 +151,8 @@ async function storeOpportunities(
     signal: opp.signal,
     sub_signal: opp.sub_signal ?? null,
     source: opp.source,
-    confidence: Math.round(opp.confidence * 100),
-    score: opp.score,
+    confidence: Math.round((opp.confidence || 0.5) * 100),
+    score: Math.round(opp.score || 0),
     metadata: opp.metadata ?? {},
   }))
 
