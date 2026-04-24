@@ -4,7 +4,6 @@ import { SIGNAL_WEIGHTS, type SignalType, type Opportunity, type BrandIntent } f
 import { DiscoveryAdapter, getAdaptersForSignal, createAdapterRegistry } from "./adapter"
 import { generateQueries } from "./queryGenerator"
 
-import { RedditAdapter } from "./adapters/reddit"
 import { SearchAdapter } from "./adapters/search"
 
 const logger = pino({ level: "debug" })
@@ -46,14 +45,11 @@ function createAdaptersForBrand(
     ),
   )
 
-  adapters.push(new RedditAdapter())
-
   return createAdapterRegistry(adapters)
 }
 
 const defaultAdapters = createAdapterRegistry([
   new SearchAdapter({}),
-  new RedditAdapter(),
 ])
 
 export interface SignalDiscoveryConfig {

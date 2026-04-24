@@ -578,7 +578,7 @@ function getMockSearchResultsIfAllowed(query: string): SearchResult[] | null {
 // =========================================================
 
 export class SearchAdapter extends DiscoveryAdapter {
-  source = "reddit"
+  source = "community_search"
   supportedSignals = [
     SignalType.HIRING, SignalType.PAIN, SignalType.GROWTH_ACTIVITY,
     SignalType.TECH_USAGE, SignalType.FUNDING, SignalType.LAUNCH,
