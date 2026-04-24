@@ -404,26 +404,44 @@ async function fetchHackerNewsSearch(query: string): Promise<SearchResult[]> {
 
     const $ = cheerio.load(result.content)
     
-    $("div.story, div.item, article").each((idx, el) => {
+    // HN Algolia - stories have class 'Story' or are in tables
+    $("tr.athing, div.story, article.story, .story-row").each((idx, el) => {
       const container = $(el)
-      const title = container.find("a.story__title, a.title, span.title").text().trim()
-      const link = container.find("a.story__title, a.title").attr("href")
-      const url = container.find("a.story__url, span.url a, a.url").text().trim()
-      const author = container.find("span.author, a.author").text().trim()
-      const timestamp = container.find("span.date, time").text().trim()
-      const points = container.find("span.counter, span.points").text().trim()
+      const title = container.find("a.story__title, a.titlelink, span.title a, a[rel*=nofollow]").first().text().trim() || container.find("a").first().text().trim()
+      const link = container.find("a.story__title, a.titlelink").attr("href") || container.find("a.story__url, a.srclang").attr("href")
+      const url = container.find("span.sitebit a, span.url").text().trim()
+      const author = container.find("a.hnuser, span.author, a[href*='/user']").text().trim()
+      const timestamp = container.find("span.age, time").attr("title") || container.find("span.age, time").text().trim()
+      const points = container.find("span.score, span.rank").text().trim()
       
-      if (title) {
+      if (title && title.length > 3) {
         results.push({
           title: title.slice(0, 200),
           link: normalizeUrl(link || url || ""),
-          snippet: `Points: ${points || 0} | by ${author || "unknown"} | ${timestamp || ""}`.slice(0, 200),
+          snippet: `Points: ${points || 0} | by ${author || "unknown"}`.slice(0, 200),
           author: author || "anonymous",
           timestamp,
           position: idx + 1,
         })
       }
     })
+
+    // Fallback: any link that looks like HN story
+    if (results.length === 0) {
+      $("a[href*='item?id='], a[href*='/item/']").each((idx, el) => {
+        const link = $(el).attr("href")
+        const title = $(el).text().trim()
+        
+        if (link && title && title.length > 5 && link.includes("item")) {
+          results.push({
+            title: title.slice(0, 200),
+            link: "https://news.ycombinator.com/" + link,
+            snippet: "HN story",
+            position: idx + 1,
+          })
+        }
+      })
+    }
 
     logger.info({ stage: "HN_SUCCESS", query, count: results.length })
   } catch (error) {
@@ -455,15 +473,16 @@ async function fetchIndieHackersSearch(query: string): Promise<SearchResult[]> {
 
     const $ = cheerio.load(result.content)
     
-    $("div.post, article.post, div.hacker-story, div.post-card").each((idx, el) => {
+    // Indie Hackers - posts have class 'post' or are in list items
+    $("div.post, article.post, li.post-list-item, div.content-wrapper").each((idx, el) => {
       const container = $(el)
-      const title = container.find("h3, h2, .post-title, .title").first().text().trim()
+      const title = container.find("h3, h2, .post-title, a.title").first().text().trim() || container.find("a").first().text().trim()
       const link = container.find("a.title, a.post-link, h3 a, h2 a").first().attr("href")
-      const author = container.find("span.author, .user-name, by").first().text().trim()
-      const snippet = container.find("p.excerpt, .content, .post-body").first().text().trim().slice(0, 200)
-      const timestamp = container.find("time, .date, .timestamp").first().text().trim()
+      const author = container.find("span.author, .user-name, a[href*='/u/'], a[href*='/user']").first().text().trim()
+      const snippet = container.find("p.excerpt, .content, .post-body, .description").first().text().trim().slice(0, 200)
+      const timestamp = container.find("time, .date, .timestamp, span.created-at").first().text().trim()
       
-      if (title) {
+      if (title && title.length > 3) {
         results.push({
           title: title.slice(0, 200),
           link: normalizeUrl(link || ""),
@@ -476,14 +495,15 @@ async function fetchIndieHackersSearch(query: string): Promise<SearchResult[]> {
     })
 
     if (results.length === 0) {
-      $("a[href*='/post/']").each((idx, el) => {
+      // Fallback: any link to posts
+      $("a[href*='/post/'], a[href*='/products/']").each((idx, el) => {
         const link = $(el).attr("href")
         const title = $(el).text().trim()
         
-        if (link && title && link.length > 5) {
+        if (link && title && title.length > 3) {
           results.push({
             title: title.slice(0, 200),
-            link: normalizeUrl(link),
+            link: "https://www.indiehackers.com" + link,
             snippet: "",
             timestamp: "",
             position: idx + 1,
@@ -522,14 +542,15 @@ async function fetchProductHuntSearch(query: string): Promise<SearchResult[]> {
 
     const $ = cheerio.load(result.content)
     
-    $("div.product, article.product, div.product-item, div.post-item").each((idx, el) => {
+    // Product Hunt products
+    $("div.product, article.product, div.product-item, div.post-item, li[data-hook*=product]").each((idx, el) => {
       const container = $(el)
-      const title = container.find("h3, h2, .product-name, .title").first().text().trim()
+      const title = container.find("h3, h2, .product-name, .title, a[href*='/products/']").first().text().trim()
       const link = container.find("a.product-link, a[href*='/products/']").first().attr("href")
-      const tagline = container.find("p.tagline, .tagline, .description").first().text().trim()
-      const votes = container.find("span.votes, .vote-count, [data-test*=votes]").first().text().trim()
+      const tagline = container.find("p.tagline, .tagline, .description, .product-description").first().text().trim()
+      const votes = container.find("span.votes, .vote-count, [data-hook*=vote], button").first().text().trim()
       
-      if (title) {
+      if (title && title.length > 2) {
         results.push({
           title: title.slice(0, 200),
           link: normalizeUrl(link || ""),
@@ -539,6 +560,7 @@ async function fetchProductHuntSearch(query: string): Promise<SearchResult[]> {
       }
     })
 
+    // Fallback: any product link
     if (results.length === 0) {
       $("a[href*='/products/']").each((idx, el) => {
         const link = $(el).attr("href")
@@ -547,7 +569,7 @@ async function fetchProductHuntSearch(query: string): Promise<SearchResult[]> {
         if (link && title && title.length > 2) {
           results.push({
             title: title.slice(0, 200),
-            link: normalizeUrl(link),
+            link: "https://www.producthunt.com" + link,
             snippet: "",
             position: idx + 1,
           })
