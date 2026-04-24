@@ -4,7 +4,6 @@ import { SIGNAL_WEIGHTS, type SignalType, type Opportunity, type BrandIntent } f
 import { DiscoveryAdapter, getAdaptersForSignal, createAdapterRegistry } from "./adapter"
 import { generateQueries } from "./queryGenerator"
 
-import { JobsAdapter } from "./adapters/jobs"
 import { RedditAdapter } from "./adapters/reddit"
 import { SearchAdapter } from "./adapters/search"
 
@@ -39,7 +38,7 @@ function createAdaptersForBrand(
 ): Map<string, DiscoveryAdapter> {
   const adapters: DiscoveryAdapter[] = []
 
-  // Always add SearchAdapter - uses Scrapling by default, falls back to Zenserp if API key provided
+  // Always add SearchAdapter - uses Scrapling by default
   adapters.push(
     new SearchAdapter(
       { zenserpApiKey: credentials.discoveryApiKey },
@@ -47,7 +46,6 @@ function createAdaptersForBrand(
     ),
   )
 
-  adapters.push(new JobsAdapter())
   adapters.push(new RedditAdapter())
 
   return createAdapterRegistry(adapters)
@@ -55,7 +53,6 @@ function createAdaptersForBrand(
 
 const defaultAdapters = createAdapterRegistry([
   new SearchAdapter({}),
-  new JobsAdapter(),
   new RedditAdapter(),
 ])
 
