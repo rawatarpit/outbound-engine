@@ -13,12 +13,14 @@ const MAX_OPPORTUNITIES_PER_SIGNAL = 50
 
 interface BrandCredentials {
   discoveryApiKey?: string
+  scraperApiKey?: string
+  apifyApiKey?: string
 }
 
 async function getBrandCredentials(brandId: string): Promise<BrandCredentials> {
   const { data: brand } = await supabase
     .from("brand_profiles")
-    .select("discovery_api_key")
+    .select("discovery_api_key, scraper_api_key, apify_api_key")
     .eq("id", brandId)
     .single()
 
@@ -28,6 +30,8 @@ async function getBrandCredentials(brandId: string): Promise<BrandCredentials> {
 
   return {
     discoveryApiKey: brand.discovery_api_key || undefined,
+    scraperApiKey: brand.scraper_api_key || undefined,
+    apifyApiKey: brand.apify_api_key || undefined,
   }
 }
 
@@ -37,10 +41,14 @@ function createAdaptersForBrand(
 ): Map<string, DiscoveryAdapter> {
   const adapters: DiscoveryAdapter[] = []
 
-  // Always add SearchAdapter - uses Scrapling by default
+  // Always add SearchAdapter - uses ScraperAPI/Apify now
   adapters.push(
     new SearchAdapter(
-      { zenserpApiKey: credentials.discoveryApiKey },
+      { 
+        zenserpApiKey: credentials.discoveryApiKey,
+        scraperApiKey: credentials.scraperApiKey,
+        apifyApiKey: credentials.apifyApiKey,
+      },
       brandId,
     ),
   )
