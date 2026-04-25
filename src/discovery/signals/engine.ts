@@ -1,10 +1,11 @@
 import pino from "pino"
 import { supabase, BrandProfile } from "../../db/supabase"
 import { SIGNAL_WEIGHTS, type SignalType, type Opportunity, type BrandIntent } from "./types"
-import { DiscoveryAdapter, getAdaptersForSignal, createAdapterRegistry } from "./adapter"
+import { getAdaptersForSignal, createAdapterRegistry, DiscoveryAdapter } from "./adapter"
 import { generateQueries } from "./queryGenerator"
 
 import { SearchAdapter } from "./adapters/search"
+import { CrawleeAdapter } from "./adapters/crawlee"
 
 const logger = pino({ level: "debug" })
 
@@ -41,7 +42,10 @@ function createAdaptersForBrand(
 ): Map<string, DiscoveryAdapter> {
   const adapters: DiscoveryAdapter[] = []
 
-  // Always add SearchAdapter - uses ScraperAPI/Apify now
+  // CrawleeAdapter - key-free, uses local Playwright with stealth
+  adapters.push(new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }))
+
+  // SearchAdapter - fallback if Crawlee fails (uses ScraperAPI/Apify with API keys)
   adapters.push(
     new SearchAdapter(
       { 
@@ -57,6 +61,7 @@ function createAdaptersForBrand(
 }
 
 const defaultAdapters = createAdapterRegistry([
+  new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }),
   new SearchAdapter({}),
 ])
 

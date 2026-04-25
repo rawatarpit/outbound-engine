@@ -27,7 +27,7 @@ export const baseConfigSchema = z.object({
 
 export abstract class DiscoveryAdapter {
   abstract source: string
-  abstract supportedSignals: SignalType[]
+  abstract supportedSignals: (SignalType | string)[]
 
   protected config: z.infer<typeof baseConfigSchema> & AdapterConfig
 
@@ -39,8 +39,8 @@ export abstract class DiscoveryAdapter {
 
   abstract normalize(raw: unknown[]): Opportunity[]
 
-  supports(signal: SignalType): boolean {
-    return this.supportedSignals.includes(signal)
+  supports(signal: SignalType | string): boolean {
+    return this.supportedSignals.includes(signal as SignalType)
   }
 
   protected createOpportunity(
