@@ -162,10 +162,6 @@ export class CrawleeAdapter extends DiscoveryAdapter {
         allResults.push(...results)
 
         logger.info({ url, title, resultCount: results.length }, "Crawled page")
-
-        await enqueueLinks({
-          strategy: "same-domain",
-        })
       },
 
       failedRequestHandler({ request, log }) {
