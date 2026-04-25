@@ -127,6 +127,7 @@ export class CrawleeAdapter extends DiscoveryAdapter {
       `https://www.indiehackers.com/search?q=${encodedQuery}`,
       `https://news.ycombinator.com/newest?q=${encodedQuery}`,
       `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
+      `https://wellfound.com/search?q=${encodedQuery}`,
     ]
 
     return urls
@@ -244,6 +245,7 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const isIH = url.includes("indiehackers.com")
   const isHN = url.includes("ycombinator.com")
   const isRemoteOk = url.includes("remoteok.com")
+  const isWellfound = url.includes("wellfound.com")
 
   if (isIH) {
     $("a[href*='/post/']").each((_i, el) => {
@@ -319,6 +321,38 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
           link: `https://remoteok.com${href}`,
           snippet: "",
           source: "remoteok",
+        })
+      }
+    })
+  } else if (isWellfound) {
+    $("a[href*='/j/']").each((_i, el) => {
+      const $el = $(el)
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
+      const parent = $el.closest("div, article")
+      const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
+
+      if (text && text.length > 3 && text.length < 150) {
+        results.push({
+          title: text,
+          link: `https://wellfound.com${href}`,
+          snippet: parentText,
+          source: "wellfound",
+        })
+      }
+    })
+    $("h2, h3, .job-title, [data-testid='job-title']").each((_i, el) => {
+      const $el = $(el)
+      const text = $el.text().trim()
+      const linkEl = $el.find("a").first()
+      const href = linkEl.length ? linkEl.attr("href") || "" : ""
+
+      if (text && text.length > 3 && text.length < 150) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://wellfound.com${href}`,
+          snippet: "",
+          source: "wellfound",
         })
       }
     })
