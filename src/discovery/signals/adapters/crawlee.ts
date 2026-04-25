@@ -246,6 +246,7 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
 
   const isGoogle = url.includes("google.com")
   const isHN = url.includes("ycombinator.com")
+  const isIH = url.includes("indiehackers.com")
 
   if (isGoogle) {
     $("div.g").each((_i, el) => {
@@ -278,13 +279,44 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
         })
       }
     })
+  } else if (isIH) {
+    $("a[href*='/post/']").each((_i, el) => {
+      const $el = $(el)
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
+      const parent = $el.parent()
+      const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
+
+      if (text && text.length > 3) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
+          snippet: parentText,
+          source: "indiehackers",
+        })
+      }
+    })
+    $("h3 a, h2 a, .post-title a").each((_i, el) => {
+      const $el = $(el)
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
+
+      if (text && text.length > 3) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
+          snippet: "",
+          source: "indiehackers",
+        })
+      }
+    })
   } else {
     $("a[href]").each((_i, el) => {
       const $el = $(el)
       const text = $el.text().trim()
       const href = $el.attr("href") || ""
 
-      if (text && href.match(/^https?:\/\//)) {
+      if (text && text.length > 5 && href.match(/^https?:\/\//)) {
         results.push({
           title: text,
           link: href,
