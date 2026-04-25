@@ -126,6 +126,7 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     const urls = [
       `https://www.indiehackers.com/search?q=${encodedQuery}`,
       `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+      `https://ycombinator.com/jobs?=${encodedQuery}`,
       `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
       `https://wellfound.com/search?q=${encodedQuery}`,
     ]
@@ -246,6 +247,7 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const isHN = url.includes("ycombinator.com")
   const isRemoteOk = url.includes("remoteok.com")
   const isWellfound = url.includes("wellfound.com")
+  const isYCJobs = url.includes("/jobs")
 
   if (isIH) {
     $("a[href*='/post/']").each((_i, el) => {
@@ -353,6 +355,38 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
           link: href.startsWith("http") ? href : `https://wellfound.com${href}`,
           snippet: "",
           source: "wellfound",
+        })
+      }
+    })
+  } else if (isYCJobs) {
+    $("a[href*='/jobs/']").each((_i, el) => {
+      const $el = $(el)
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
+      const parent = $el.closest(".job, .row, li")
+      const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
+
+      if (text && text.length > 3 && text.length < 150) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://ycombinator.com${href}`,
+          snippet: parentText,
+          source: "ycombinator_jobs",
+        })
+      }
+    })
+    $("h2, h3, .title, .job-title").each((_i, el) => {
+      const $el = $(el)
+      const text = $el.text().trim()
+      const linkEl = $el.find("a").first()
+      const href = linkEl.length ? linkEl.attr("href") || "" : ""
+
+      if (text && text.length > 3 && text.length < 150) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://ycombinator.com${href}`,
+          snippet: "",
+          source: "ycombinator_jobs",
         })
       }
     })
