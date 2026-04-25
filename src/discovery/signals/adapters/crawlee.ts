@@ -125,6 +125,8 @@ export class CrawleeAdapter extends DiscoveryAdapter {
 
     const urls = [
       `https://www.indiehackers.com/search?q=${encodedQuery}`,
+      `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+      `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
     ]
 
     return urls
@@ -144,11 +146,11 @@ export class CrawleeAdapter extends DiscoveryAdapter {
         },
       },
 
-      async requestHandler({ page, request, enqueueLinks }) {
+      async requestHandler({ page, request }) {
         const url = request.url
 
         try {
-          await page.waitForLoadState("domcontentloaded", { timeout: 10000 })
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
         } catch {
           logger.warn({ url }, "Page load timeout")
         }
@@ -178,8 +180,8 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   private classifyIntent(title: string, snippet: string): string {
     const text = (title + " " + snippet).toLowerCase()
 
-    const hiringKeywords = ["hire", "recruit", "job opening", "vacancy", "position", "candidate"]
-    const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "need help", "how to"]
+    const hiringKeywords = ["hire", "recruit", "job", "vacancy", "position", "apply", "application"]
+    const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "need help", "how to", "looking for"]
     const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review"]
 
     for (const kw of hiringKeywords) {
@@ -239,55 +241,21 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const results: CrawleeSearchResult[] = []
   const $ = cheerio.load(html)
 
-  const isGoogle = url.includes("google.com")
-  const isHN = url.includes("ycombinator.com")
   const isIH = url.includes("indiehackers.com")
+  const isHN = url.includes("ycombinator.com")
+  const isRemoteOk = url.includes("remoteok.com")
 
-  if (isGoogle) {
-    $("div.g").each((_i, el) => {
+  if (isIH) {
+    $("a[href*='/post/']").each((_i, el) => {
       const $el = $(el)
-      const title = $el.find("h3").text().trim()
-      const snippet = $el.find("div[data-sncf]").text().trim()
-      const link = $el.find("a").attr("href") || ""
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
 
-      if (title && link) {
+      if (text && text.length > 3 && text.length < 150) {
         results.push({
-          title,
-          link: link.startsWith("/url?") ? new URL(link).searchParams.get("q") || link : link,
-          snippet,
-          source: "google",
-        })
-      }
-    })
-  } else if (isHN) {
-    $("tr.athing").each((_i, el) => {
-      const $el = $(el)
-      const title = $el.find("a.storylink").text().trim()
-      const link = $el.find("a.storylink").attr("href") || ""
-
-      if (title) {
-        results.push({
-          title,
-          link,
-          snippet: $el.siblings().find("div.subtext").text().trim(),
-          source: "hackernews",
-        })
-      }
-    })
-  } else if (isIH) {
-    $("div.border-gray, div.border, div.p-3, div.gap-2, article, .post-item").each((_i, el) => {
-      const $el = $(el)
-      const link = $el.find("a[href*='/post/']").first().attr("href") || ""
-      const titleEl = $el.find("h3, h2, .font-bold, [class*='text']").first()
-      const text = titleEl.length ? titleEl.text().trim() : $el.text().trim().split("\n")[0].trim()
-      const snippetEl = $el.find("p, .text-gray, [class*='text-gray']")
-      const snippet = snippetEl.length ? snippetEl.text().trim().slice(0, 200) : ""
-
-      if (text && text.length > 3) {
-        results.push({
-          title: text.slice(0, 100),
-          link: link.startsWith("http") ? link : `https://www.indiehackers.com${link}`,
-          snippet: snippet.slice(0, 200),
+          title: text,
+          link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
+          snippet: $el.parent().text().trim().slice(0, 200),
           source: "indiehackers",
         })
       }
@@ -307,6 +275,53 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
         })
       }
     })
+  } else if (isHN) {
+    $("tr.athing").each((_i, el) => {
+      const $el = $(el)
+      const title = $el.find("a.storylink").text().trim()
+      const link = $el.find("a.storylink").attr("href") || ""
+
+      if (title) {
+        results.push({
+          title,
+          link,
+          snippet: $el.siblings().find("div.subtext").text().trim(),
+          source: "hackernews",
+        })
+      }
+    })
+  } else if (isRemoteOk) {
+    $("h2, h3, .job-title").each((_i, el) => {
+      const $el = $(el)
+      const text = $el.text().trim()
+      const linkEl = $el.find("a").first()
+      const href = linkEl.length ? linkEl.attr("href") || "" : ""
+      const companyEl = $el.next().find("a, .company")
+      const company = companyEl.length ? companyEl.text().trim() : ""
+
+      if (text && text.length > 3) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://remoteok.com${href}`,
+          snippet: company,
+          source: "remoteok",
+        })
+      }
+    })
+    $("a[href*='/jobs/']").each((_i, el) => {
+      const $el = $(el)
+      const href = $el.attr("href") || ""
+      const text = $el.text().trim()
+
+      if (text && text.length > 5 && !text.includes("apply") && !text.includes("›")) {
+        results.push({
+          title: text.slice(0, 100),
+          link: `https://remoteok.com${href}`,
+          snippet: "",
+          source: "remoteok",
+        })
+      }
+    })
   } else {
     $("a[href]").each((_i, el) => {
       const $el = $(el)
@@ -315,7 +330,7 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
 
       if (text && text.length > 5 && href.match(/^https?:\/\//)) {
         results.push({
-          title: text,
+          title: text.slice(0, 100),
           link: href,
           snippet: $el.parent().text().trim().slice(0, 200),
           source: "crawlee",
