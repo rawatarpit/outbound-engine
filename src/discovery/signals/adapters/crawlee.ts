@@ -1,4 +1,4 @@
-import { PlaywrightCrawler, ProxyConfiguration } from "@crawlee/playwright"
+import { PlaywrightCrawler } from "@crawlee/playwright"
 import { SignalType, SIGNAL_WEIGHTS } from "../types"
 import type { Opportunity } from "../types"
 import { DiscoveryAdapter, AdapterParams, FetchResult, AdapterConfig } from "../adapter"
@@ -124,8 +124,8 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     const encodedQuery = encodeURIComponent(query)
 
     const urls = [
-      `https://www.google.com/search?q=${encodedQuery}&num=10`,
       `https://news.ycombinator.com/search?query=${encodedQuery}&search=Search`,
+      `https://www.indiehackers.com/search?q=${encodedQuery}`,
     ]
 
     return urls
@@ -134,12 +134,7 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   private async crawlUrls(urls: string[]): Promise<CrawleeSearchResult[]> {
     const allResults: CrawleeSearchResult[] = []
 
-    const proxyConfiguration = new ProxyConfiguration({
-      proxyUrls: [],
-    })
-
     const crawler = new PlaywrightCrawler({
-      proxyConfiguration,
       maxConcurrency: this.maxConcurrency,
       maxRequestRetries: MAX_RETRIES,
 
