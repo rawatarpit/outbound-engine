@@ -124,7 +124,6 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     const encodedQuery = encodeURIComponent(query)
 
     const urls = [
-      `https://news.ycombinator.com/search?query=${encodedQuery}&search=Search`,
       `https://www.indiehackers.com/search?q=${encodedQuery}`,
     ]
 
@@ -276,28 +275,30 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
       }
     })
   } else if (isIH) {
-    $("a[href*='/post/']").each((_i, el) => {
+    $("div.border-gray, div.border, div.p-3, div.gap-2, article, .post-item").each((_i, el) => {
       const $el = $(el)
-      const href = $el.attr("href") || ""
-      const text = $el.text().trim()
-      const parent = $el.parent()
-      const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
+      const link = $el.find("a[href*='/post/']").first().attr("href") || ""
+      const titleEl = $el.find("h3, h2, .font-bold, [class*='text']").first()
+      const text = titleEl.length ? titleEl.text().trim() : $el.text().trim().split("\n")[0].trim()
+      const snippetEl = $el.find("p, .text-gray, [class*='text-gray']")
+      const snippet = snippetEl.length ? snippetEl.text().trim().slice(0, 200) : ""
 
       if (text && text.length > 3) {
         results.push({
-          title: text,
-          link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
-          snippet: parentText,
+          title: text.slice(0, 100),
+          link: link.startsWith("http") ? link : `https://www.indiehackers.com${link}`,
+          snippet: snippet.slice(0, 200),
           source: "indiehackers",
         })
       }
     })
-    $("h3 a, h2 a, .post-title a").each((_i, el) => {
+    $("h3, h2").each((_i, el) => {
       const $el = $(el)
-      const href = $el.attr("href") || ""
       const text = $el.text().trim()
+      const linkEl = $el.find("a").first()
+      const href = linkEl.length ? linkEl.attr("href") || "" : ""
 
-      if (text && text.length > 3) {
+      if (text && text.length > 3 && text.length < 150) {
         results.push({
           title: text,
           link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
