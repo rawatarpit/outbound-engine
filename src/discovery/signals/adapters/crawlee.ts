@@ -35,13 +35,22 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   source = "crawlee"
   supportedSignals = [
     SignalType.HIRING,
+    SignalType.HIRING_ENGINEER,
+    SignalType.HIRING_SALES,
+    SignalType.REMOTE_HIRING,
+    SignalType.HIRING_AGENCY,
     SignalType.PAIN,
     SignalType.GROWTH_ACTIVITY,
     SignalType.TECH_USAGE,
     SignalType.FUNDING,
+    SignalType.FUNDING_ANNOUNCEMENT,
     SignalType.LAUNCH,
+    SignalType.PRODUCT_LAUNCH,
     SignalType.ADVERTISING,
     SignalType.PARTNERSHIP,
+    SignalType.EXPANSION,
+    SignalType.TEAM_GROWTH,
+    SignalType.ACQUISITION,
   ]
 
   private stealth: boolean
@@ -120,16 +129,55 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     }
   }
 
-  private buildSearchUrls(query: string, _signal: string): string[] {
+  private buildSearchUrls(query: string, signal: string): string[] {
     const encodedQuery = encodeURIComponent(query)
 
-    const urls = [
-      `https://www.indiehackers.com/search?q=${encodedQuery}`,
-      `https://news.ycombinator.com/newest?q=${encodedQuery}`,
-      `https://ycombinator.com/jobs?=${encodedQuery}`,
-      `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
-      `https://wellfound.com/search?q=${encodedQuery}`,
-    ]
+    const urls: string[] = []
+
+    // YC + Startup sources
+    if (signal === "hiring" || signal === "hiring_sales" || signal === "hiring_engineer" || signal === "remote_hiring") {
+      urls.push(
+        `https://ycombinator.com/jobs/?${encodedQuery}`,
+        `https://www.ycombinator.com/apply?=${encodedQuery}`,
+        `https://wellfound.com/join?q=${encodedQuery}`,
+        `https://wellfound.com/startups?q=${encodedQuery}`,
+        `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
+        `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
+        `https://angel.co/roles?=${encodedQuery}`,
+      )
+    } else if (signal === "funding" || signal === "funding_announcement") {
+      urls.push(
+        `https://news.ycombinator.com/?query=${encodedQuery}&hits=true`,
+        `https://www.ycombinator.com/news?q=${encodedQuery}`,
+        `https://www.indiehackers.com/ask?=${encodedQuery}`,
+        `https://www.crunchbase.com/discover/organizations/latest/${encodedQuery}`,
+      )
+    } else if (signal === "launch" || signal === "product_launch") {
+      urls.push(
+        `https://www.producthunt.com/search?q=${encodedQuery}`,
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://news.ycombinator.com/item?id=${encodedQuery}`,
+        `https://www.producthunt.com/discover?q=${encodedQuery}`,
+      )
+    } else if (signal === "tech_usage" || signal === "pain") {
+      urls.push(
+        `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://www.indiehackers.com/forum?=${encodedQuery}`,
+      )
+    } else {
+      // Default: all sources
+      urls.push(
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+        `https://ycombinator.com/jobs/?${encodedQuery}`,
+        `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
+        `https://wellfound.com/join?q=${encodedQuery}`,
+        `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
+        `https://www.producthunt.com/search?q=${encodedQuery}`,
+        `https://www.indiehackers.com/ask?q=${encodedQuery}`,
+      )
+    }
 
     return urls
   }
@@ -182,18 +230,34 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   private classifyIntent(title: string, snippet: string): string {
     const text = (title + " " + snippet).toLowerCase()
 
-    const hiringKeywords = ["hire", "recruit", "job", "vacancy", "position", "apply", "application"]
-    const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "need help", "how to", "looking for"]
-    const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review"]
+    const hiringKeywords = ["hire", "recruit", "job", "vacancy", "position", "apply", "application", "looking for", "seeking"]
+    const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "need help", "how to", "looking for", "hard to", "failing"]
+    const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review", "switching to", "migrating"]
+    const fundingKeywords = ["raised", "funding", "series", "invested", "seed", "venture", "capital", "backed"]
+    const launchKeywords = ["launch", "released", "announcing", "new product", "beta", "public"]
+    const growthKeywords = ["scaling", "growing", "growth", "expanding", "hired", "team", "revenue"]
+    const remoteKeywords = ["remote", "work from home", "distributed", "anywhere"]
 
+    for (const kw of fundingKeywords) {
+      if (text.includes(kw)) return "funding"
+    }
+    for (const kw of launchKeywords) {
+      if (text.includes(kw)) return "launch"
+    }
+    for (const kw of growthKeywords) {
+      if (text.includes(kw)) return "growth"
+    }
+    for (const kw of remoteKeywords) {
+      if (text.includes(kw)) return "remote_hiring"
+    }
     for (const kw of hiringKeywords) {
       if (text.includes(kw)) return "hiring"
     }
-    for (const kw of painKeywords) {
-      if (text.includes(kw)) return "pain"
-    }
     for (const kw of toolSearchKeywords) {
       if (text.includes(kw)) return "tool_search"
+    }
+    for (const kw of painKeywords) {
+      if (text.includes(kw)) return "pain"
     }
     return "discussion"
   }
@@ -201,11 +265,19 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   private calculateIntentScore(intentType: string): number {
     const weights: Record<string, number> = {
       hiring: 0.9,
+      hiring_sales: 0.92,
+      hiring_engineer: 0.92,
+      remote_hiring: 0.88,
+      hiring_agency: 0.75,
       pain: 0.85,
       tool_search: 0.75,
-      funding: 0.8,
-      launch: 0.7,
-      growth_activity: 0.6,
+      funding: 0.85,
+      funding_announcement: 0.88,
+      launch: 0.75,
+      product_launch: 0.78,
+      growth: 0.7,
+      expansion: 0.72,
+      acquisition: 0.8,
     }
     return weights[intentType] ?? 0.5
   }
@@ -214,10 +286,18 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     const mapping: Record<string, string> = {
       pain: SignalType.PAIN,
       hiring: SignalType.HIRING,
+      hiring_sales: SignalType.HIRING_SALES,
+      hiring_engineer: SignalType.HIRING_ENGINEER,
+      remote_hiring: SignalType.REMOTE_HIRING,
+      hiring_agency: SignalType.HIRING_AGENCY,
       tool_search: SignalType.TECH_USAGE,
       funding: SignalType.FUNDING,
+      funding_announcement: SignalType.FUNDING_ANNOUNCEMENT,
       launch: SignalType.LAUNCH,
-      growth_activity: SignalType.GROWTH_ACTIVITY,
+      product_launch: SignalType.PRODUCT_LAUNCH,
+      growth: SignalType.GROWTH_ACTIVITY,
+      expansion: SignalType.EXPANSION,
+      acquisition: SignalType.ACQUISITION,
     }
     return mapping[intentType] ?? SignalType.PAIN
   }
@@ -247,9 +327,12 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const isHN = url.includes("ycombinator.com")
   const isRemoteOk = url.includes("remoteok.com")
   const isWellfound = url.includes("wellfound.com")
-  const isYCJobs = url.includes("/jobs")
+  const isWeWorkRemotely = url.includes("weworkremotely.com")
+  const isProductHunt = url.includes("producthunt.com")
+  const isAngel = url.includes("angel.co")
 
   if (isIH) {
+    // Indie Hackers - posts, questions, forum
     $("a[href*='/post/']").each((_i, el) => {
       const $el = $(el)
       const href = $el.attr("href") || ""
@@ -264,43 +347,59 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
         })
       }
     })
-    $("h3, h2").each((_i, el) => {
+    $("a[href*='/ask/']").each((_i, el) => {
       const $el = $(el)
+      const href = $el.attr("href") || ""
       const text = $el.text().trim()
-      const linkEl = $el.find("a").first()
-      const href = linkEl.length ? linkEl.attr("href") || "" : ""
 
       if (text && text.length > 3 && text.length < 150) {
         results.push({
           title: text,
           link: href.startsWith("http") ? href : `https://www.indiehackers.com${href}`,
-          snippet: "",
+          snippet: $el.parent().text().trim().slice(0, 200),
           source: "indiehackers",
         })
       }
     })
   } else if (isHN) {
-    $("tr.athing").each((_i, el) => {
+    // Hacker News - stories and jobs
+    $("tr.athing, tr.job").each((_i, el) => {
       const $el = $(el)
-      const title = $el.find("a.storylink").text().trim()
-      const link = $el.find("a.storylink").attr("href") || ""
-
+      const title = $el.find("a.storylink, a.titlelink").text().trim()
+      const link = $el.find("a.storylink, a.titlelink").attr("href") || ""
+      
       if (title) {
         results.push({
           title,
           link,
-          snippet: $el.siblings().find("div.subtext").text().trim(),
+          snippet: $el.find("div.subtext, span.ycombinator").text().trim(),
+          source: "hackernews",
+        })
+      }
+    })
+    $("a[href*='vote']").each((_i, el) => {
+      const $el = $(el)
+      const parent = $el.closest("tr")
+      const title = parent.find("a.storylink, a.titlelink").text().trim()
+      const link = parent.find("a.storylink, a.titlelink").attr("href") || ""
+      
+      if (title && title.length > 3) {
+        results.push({
+          title,
+          link,
+          snippet: parent.find("div.subtext").text().trim(),
           source: "hackernews",
         })
       }
     })
   } else if (isRemoteOk) {
-    $("h2, h3, .job-title").each((_i, el) => {
+    // RemoteOK - job listings
+    $("h2, h3, .job-title, [data-testid='job-title']").each((_i, el) => {
       const $el = $(el)
       const text = $el.text().trim()
       const linkEl = $el.find("a").first()
       const href = linkEl.length ? linkEl.attr("href") || "" : ""
-      const companyEl = $el.next().find("a, .company")
+      const companyEl = $el.next().find("a, .company, .employer")
       const company = companyEl.length ? companyEl.text().trim() : ""
 
       if (text && text.length > 3) {
@@ -320,30 +419,31 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
       if (text && text.length > 5 && !text.includes("apply") && !text.includes("›")) {
         results.push({
           title: text.slice(0, 100),
-          link: `https://remoteok.com${href}`,
+          link: href.startsWith("http") ? href : `https://remoteok.com${href}`,
           snippet: "",
           source: "remoteok",
         })
       }
     })
   } else if (isWellfound) {
-    $("a[href*='/j/']").each((_i, el) => {
+    // Wellfound (formerly AngelList) - jobs and startups
+    $("a[href*='/j/'], a[href*='/startups/']").each((_i, el) => {
       const $el = $(el)
       const href = $el.attr("href") || ""
       const text = $el.text().trim()
-      const parent = $el.closest("div, article")
+      const parent = $el.closest("div, article, li")
       const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
 
       if (text && text.length > 3 && text.length < 150) {
         results.push({
           title: text,
-          link: `https://wellfound.com${href}`,
+          link: href.startsWith("http") ? href : `https://wellfound.com${href}`,
           snippet: parentText,
           source: "wellfound",
         })
       }
     })
-    $("h2, h3, .job-title, [data-testid='job-title']").each((_i, el) => {
+    $("h2, h3, [data-testid='job-title'], .job-title").each((_i, el) => {
       const $el = $(el)
       const text = $el.text().trim()
       const linkEl = $el.find("a").first()
@@ -358,39 +458,58 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
         })
       }
     })
-  } else if (isYCJobs) {
-    $("a[href*='/jobs/']").each((_i, el) => {
+  } else if (isWeWorkRemotely) {
+    // We Work Remotely
+    $("h2, h3, .job-title, a[href*='/jobs/']").each((_i, el) => {
       const $el = $(el)
-      const href = $el.attr("href") || ""
       const text = $el.text().trim()
-      const parent = $el.closest(".job, .row, li")
-      const parentText = parent.length ? parent.text().trim().slice(0, 200) : ""
+      const href = $el.attr("href") || ""
 
       if (text && text.length > 3 && text.length < 150) {
         results.push({
           title: text,
-          link: href.startsWith("http") ? href : `https://ycombinator.com${href}`,
-          snippet: parentText,
-          source: "ycombinator_jobs",
+          link: href.startsWith("http") ? href : `https://weworkremotely.com${href}`,
+          snippet: $el.parent().text().trim().slice(0, 200),
+          source: "weworkremotely",
         })
       }
     })
-    $("h2, h3, .title, .job-title").each((_i, el) => {
+  } else if (isProductHunt) {
+    // Product Hunt
+    $("h3[data-testid='product-name'], h3, .product-name, a[href*='/products/']").each((_i, el) => {
       const $el = $(el)
       const text = $el.text().trim()
-      const linkEl = $el.find("a").first()
-      const href = linkEl.length ? linkEl.attr("href") || "" : ""
+      const href = $el.attr("href") || ""
+      const parent = $el.closest("[data-testid='product-card']")
+      const tagline = parent.find(".tagline, .description").text().trim()
+
+      if (text && text.length > 2 && text.length < 150) {
+        results.push({
+          title: text,
+          link: href.startsWith("http") ? href : `https://www.producthunt.com${href}`,
+          snippet: tagline.slice(0, 300),
+          source: "producthunt",
+        })
+      }
+    })
+  } else if (isAngel) {
+    // AngelList
+    $("a[href*='/jobs/'], h3, .job-title").each((_i, el) => {
+      const $el = $(el)
+      const text = $el.text().trim()
+      const href = $el.attr("href") || ""
 
       if (text && text.length > 3 && text.length < 150) {
         results.push({
           title: text,
-          link: href.startsWith("http") ? href : `https://ycombinator.com${href}`,
-          snippet: "",
-          source: "ycombinator_jobs",
+          link: href.startsWith("http") ? href : `https://angel.co${href}`,
+          snippet: $el.parent().text().trim().slice(0, 200),
+          source: "angellist",
         })
       }
     })
   } else {
+    // Generic fallback
     $("a[href]").each((_i, el) => {
       const $el = $(el)
       const text = $el.text().trim()

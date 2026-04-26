@@ -25,7 +25,7 @@ export class GoogleSerperAdapter extends DiscoveryAdapter {
         this.baseUrl,
         {
           q: params.query,
-          num: this.config.maxResults,
+          num: this.config.maxResults || 20,
           type: "search",
         },
         {
@@ -42,6 +42,8 @@ export class GoogleSerperAdapter extends DiscoveryAdapter {
         metadata: {
           searchQuery: params.query,
           resultCount: results.length,
+          source: "google_serper",
+          signal: params.signal,
         },
       }
     } catch (error) {
@@ -57,13 +59,28 @@ export class GoogleSerperAdapter extends DiscoveryAdapter {
 
     return items.map((item): Opportunity => {
       const domain = this.extractDomain(item.link)
+      const titleLower = item.title?.toLowerCase() || ""
+      const snippetLower = item.snippet?.toLowerCase() || ""
+
+      let signal: string = SignalType.PAIN
+      if (titleLower.includes("hiring") || titleLower.includes("jobs") || snippetLower.includes("hiring")) {
+        signal = SignalType.HIRING
+      } else if (titleLower.includes("funding") || titleLower.includes("raised") || snippetLower.includes("funding") || snippetLower.includes("raised")) {
+        signal = SignalType.FUNDING
+      } else if (titleLower.includes("launch") || titleLower.includes("new product") || snippetLower.includes("launch")) {
+        signal = SignalType.LAUNCH
+      } else if (titleLower.includes("review") || titleLower.includes("alternative") || titleLower.includes("vs")) {
+        signal = SignalType.TECH_USAGE
+      }
+
+      const confidence = signal === SignalType.HIRING ? 0.75 : signal === SignalType.FUNDING ? 0.78 : 0.55
 
       return this.createOpportunity({
         name: item.title.replace(/ [-|].*$/, "").trim(),
         domain,
         source: this.source,
-        signal: SignalType.PAIN,
-        confidence: 0.5,
+        signal,
+        confidence,
         metadata: {
           snippet: item.snippet,
           url: item.link,

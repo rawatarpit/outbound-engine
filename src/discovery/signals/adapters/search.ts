@@ -123,45 +123,109 @@ interface QueryVariation {
   intent: string
 }
 
-function simplifyQuery(originalQuery: string): QueryVariation[] {
+function simplifyQuery(originalQuery: string, signal?: string): QueryVariation[] {
   const variations: QueryVariation[] = []
-  const templates = [
-    { template: "struggling with outbound sales", intent: "pain" },
-    { template: "can't generate leads", intent: "pain" },
-    { template: "outbound sales problems", intent: "pain" },
-    { template: "need help with pipeline", intent: "pain" },
-    { template: "hiring sales rep", intent: "hiring" },
-    { template: "sales pipeline issues", intent: "pain" },
-    { template: "cold calling help", intent: "pain" },
-    { template: "best outbound tools", intent: "tool_search" },
-    { template: "lead generation SaaS", intent: "tool_search" },
-    { template: "outbound software", intent: "tool_search" },
-  ]
-  for (const v of templates) {
-    variations.push({ query: v.template, intent: v.intent })
+  
+  const templates: Record<string, string[]> = {
+    pain: [
+      "struggling with outbound sales",
+      "can't generate leads",
+      "outbound sales problems",
+      "need help with pipeline",
+      "cold email not working",
+      "low reply rates outbound",
+      "email open rates low",
+      "lead gen challenges",
+    ],
+    hiring: [
+      "hiring sales rep",
+      "looking for account executive",
+      "sales hiring b2b",
+      "need sales representative",
+      "hiring sales team",
+    ],
+    hiring_engineer: [
+      "hiring senior engineer",
+      "looking for developer",
+      "software engineer needed",
+      "engineering roles open",
+      "dev hiring startup",
+    ],
+    hiring_sales: [
+      "hiring sales manager",
+      "account executive jobs",
+      "sales development rep",
+      "revenue jobs b2b",
+    ],
+    remote_hiring: [
+      "remote jobs engineering",
+      "remote work hiring",
+      "distributed team hiring",
+      "work from home jobs",
+      "anywhere roles tech",
+    ],
+    tool_search: [
+      "best outbound tools",
+      "lead generation SaaS",
+      "outbound software",
+      "best sales tools",
+      "email outreach platform",
+    ],
+    funding: [
+      "seed funding b2b",
+      "series a SaaS",
+      "vc funding startup",
+    ],
+    launch: [
+      "new product launch",
+      "public beta launch",
+      "announcing startup",
+    ],
+  }
+
+  const templateSet = signal && templates[signal] ? templates[signal] : (templates.pain as string[])
+
+  for (const v of templateSet!) {
+    variations.push({ query: v, intent: signal || "pain" })
   }
   return variations
 }
 
 function classifyIntent(title: string, snippet: string): string {
   const text = (title + " " + snippet).toLowerCase()
-  const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "fail", "stuck", "issue", "error", "broken", "need help", "how to", "why is", "doesn't work"]
-  const hiringKeywords = ["looking for", "hire", "need someone", "recruit", "job opening", "hiring", "vacancy", "position", "candidate"]
-  const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review", "tool", "software", "platform"]
+  const painKeywords = ["struggling", "can't", "help", "frustrated", "problem", "fail", "stuck", "issue", "error", "broken", "need help", "how to", "why is", "doesn't work", "hard to", "failing"]
+  const hiringKeywords = ["looking for", "hire", "need someone", "recruit", "job opening", "hiring", "vacancy", "position", "apply", "seeking", "remote"]
+  const toolSearchKeywords = ["recommend", "best tool", "alternativ", "vs ", "comparison", "review", "tool", "software", "platform", "switching to", "migrating"]
+  const fundingKeywords = ["raised", "funding", "series", "invested", "seed round", "venture capital", "backed", "investment"]
+  const launchKeywords = ["launch", "released", "announced", "new product", "beta", "public launch", "debut"]
+  const growthKeywords = ["scaling", "growing", "growth", "expanding", "hired", "team", "revenue", "hiring"]
+
+  for (const kw of fundingKeywords) { if (text.includes(kw)) return "funding" }
+  for (const kw of launchKeywords) { if (text.includes(kw)) return "launch" }
+  for (const kw of growthKeywords) { if (text.includes(kw)) return "growth" }
   for (const kw of hiringKeywords) { if (text.includes(kw)) return "hiring" }
-  for (const kw of painKeywords) { if (text.includes(kw)) return "pain" }
   for (const kw of toolSearchKeywords) { if (text.includes(kw)) return "tool_search" }
+  for (const kw of painKeywords) { if (text.includes(kw)) return "pain" }
   return "discussion"
 }
 
 function calculateIntentScore(intentType: string): number {
-  switch (intentType) {
-    case "pain": return 0.85
-    case "hiring": return 0.8
-    case "tool_search": return 0.6
-    case "discussion": return 0.3
-    default: return 0.5
+  const weights: Record<string, number> = {
+    hiring: 0.9,
+    hiring_sales: 0.92,
+    hiring_engineer: 0.92,
+    remote_hiring: 0.88,
+    funding: 0.88,
+    funding_announcement: 0.9,
+    launch: 0.75,
+    product_launch: 0.78,
+    pain: 0.85,
+    tool_search: 0.65,
+    discussion: 0.3,
+    growth: 0.7,
+    expansion: 0.72,
   }
+  return weights[intentType] ?? 0.5
 }
 
 async function fetchRedditSearch(query: string): Promise<SearchResult[]> {
@@ -287,7 +351,23 @@ function getMockSearchResultsIfAllowed(query: string): SearchResult[] | null {
 
 export class SearchAdapter extends DiscoveryAdapter {
   source = "community_search"
-  supportedSignals = [SignalType.HIRING, SignalType.PAIN, SignalType.GROWTH_ACTIVITY, SignalType.TECH_USAGE, SignalType.FUNDING, SignalType.LAUNCH, SignalType.ADVERTISING, SignalType.PARTNERSHIP]
+  supportedSignals = [
+    SignalType.HIRING,
+    SignalType.HIRING_SALES,
+    SignalType.HIRING_ENGINEER,
+    SignalType.REMOTE_HIRING,
+    SignalType.FUNDING,
+    SignalType.FUNDING_ANNOUNCEMENT,
+    SignalType.LAUNCH,
+    SignalType.PRODUCT_LAUNCH,
+    SignalType.PAIN,
+    SignalType.TECH_USAGE,
+    SignalType.GROWTH_ACTIVITY,
+    SignalType.EXPANSION,
+    SignalType.ADVERTISING,
+    SignalType.PARTNERSHIP,
+    SignalType.ACQUISITION,
+  ]
   private brandId: string | null = null
 
   constructor(config: AdapterConfig = {}, brandId?: string) {
@@ -308,26 +388,49 @@ export class SearchAdapter extends DiscoveryAdapter {
   protected async executeSearch(query: string, signal: string): Promise<SearchResult[]> {
     logger.info({ stage: "ADAPTER_EXECUTION", adapter: "community_search", query, signal })
     const allResults: SearchResult[] = []
-    const intentCounts = { pain: 0, hiring: 0, tool_search: 0, discussion: 0 }
-    const queryVariations = simplifyQuery(query)
-    logger.info({ stage: "QUERY_VARIATIONS", count: queryVariations.length })
+    const intentCounts = { pain: 0, hiring: 0, tool_search: 0, discussion: 0, funding: 0, launch: 0, growth: 0 }
+    const queryVariations = simplifyQuery(query, signal)
+
+    logger.info({ stage: "QUERY_VARIATIONS", count: queryVariations.length, signal })
 
     for (let i = 0; i < queryVariations.length; i++) {
       const variation = queryVariations[i]
+
+      // YC/Hacker News
       const hnResults = await fetchHackerNewsSearch(variation.query)
-      if (hnResults.length > 0) { allResults.push(...hnResults); for (const r of hnResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ } logger.info({ stage: "HN_RESULTS", query: variation.query, count: hnResults.length }) }
-
-      const ihResults = await fetchIndieHackersSearch(variation.query)
-      if (ihResults.length > 0) { allResults.push(...ihResults); for (const r of ihResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ } logger.info({ stage: "INDIE_HACKERS_RESULTS", query: variation.query, count: ihResults.length }) }
-
-      const phResults = await fetchProductHuntSearch(variation.query)
-      if (phResults.length > 0) { allResults.push(...phResults); for (const r of phResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ } logger.info({ stage: "PRODUCT_HUNT_RESULTS", query: variation.query, count: phResults.length }) }
-
-      if (allResults.length < 5) {
-        const redditResults = await fetchRedditSearch(variation.query)
-        if (redditResults.length > 0) { allResults.push(...redditResults); for (const r of redditResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ } logger.info({ stage: "REDDIT_RESULTS", query: variation.query, count: redditResults.length }) }
+      if (hnResults.length > 0) {
+        allResults.push(...hnResults)
+        for (const r of hnResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ }
+        logger.info({ stage: "HN_RESULTS", query: variation.query, count: hnResults.length })
       }
 
+      // Indie Hackers
+      const ihResults = await fetchIndieHackersSearch(variation.query)
+      if (ihResults.length > 0) {
+        allResults.push(...ihResults)
+        for (const r of ihResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ }
+        logger.info({ stage: "INDIE_HACKERS_RESULTS", query: variation.query, count: ihResults.length })
+      }
+
+      // Product Hunt
+      const phResults = await fetchProductHuntSearch(variation.query)
+      if (phResults.length > 0) {
+        allResults.push(...phResults)
+        for (const r of phResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ }
+        logger.info({ stage: "PRODUCT_HUNT_RESULTS", query: variation.query, count: phResults.length })
+      }
+
+      // Reddit (fallback if few results)
+      if (allResults.length < 5) {
+        const redditResults = await fetchRedditSearch(variation.query)
+        if (redditResults.length > 0) {
+          allResults.push(...redditResults)
+          for (const r of redditResults) { intentCounts[classifyIntent(r.title, r.snippet) as keyof typeof intentCounts]++ }
+          logger.info({ stage: "REDDIT_RESULTS", query: variation.query, count: redditResults.length })
+        }
+      }
+
+      // Rate limiting
       if (i < queryVariations.length - 1 && allResults.length < 10) {
         const delay = 2000 + Math.random() * 1000
         await setTimeout(delay)

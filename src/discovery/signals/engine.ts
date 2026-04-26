@@ -6,6 +6,8 @@ import { generateQueries } from "./queryGenerator"
 
 import { SearchAdapter } from "./adapters/search"
 import { CrawleeAdapter } from "./adapters/crawlee"
+import { ForumAdapter } from "./adapters/forum"
+import { SocialAdapter } from "./adapters/social"
 
 const logger = pino({ level: "debug" })
 
@@ -45,7 +47,7 @@ function createAdaptersForBrand(
   // CrawleeAdapter - key-free, uses local Playwright with stealth
   adapters.push(new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }))
 
-  // SearchAdapter - fallback if Crawlee fails (uses ScraperAPI/Apify with API keys)
+  // SearchAdapter - fallback if Crawlee fails
   adapters.push(
     new SearchAdapter(
       { 
@@ -57,12 +59,20 @@ function createAdaptersForBrand(
     ),
   )
 
+  // ForumAdapter - community forums & review sites
+  adapters.push(new ForumAdapter({}))
+
+  // SocialAdapter - Twitter/Mastodon/Lemmy alternatives
+  adapters.push(new SocialAdapter({}))
+
   return createAdapterRegistry(adapters)
 }
 
 const defaultAdapters = createAdapterRegistry([
   new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }),
   new SearchAdapter({}),
+  new ForumAdapter({}),
+  new SocialAdapter({}),
 ])
 
 export interface SignalDiscoveryConfig {

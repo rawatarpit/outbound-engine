@@ -3,11 +3,6 @@ import { DiscoveryAdapter, type AdapterParams, type FetchResult, type AdapterCon
 import { SignalType } from "../types"
 import type { Opportunity } from "../types"
 
-interface JobResultConfig extends AdapterConfig {
-  appId?: string
-  country?: string
-}
-
 interface JobResult {
   title: string
   company: string
@@ -18,7 +13,12 @@ interface JobResult {
 
 export class JobsAdapter extends DiscoveryAdapter {
   source = "adzuna"
-  supportedSignals = [SignalType.HIRING]
+  supportedSignals = [
+    SignalType.HIRING,
+    SignalType.HIRING_SALES,
+    SignalType.HIRING_ENGINEER,
+    SignalType.REMOTE_HIRING,
+  ]
 
   private baseUrl = "https://api.adzuna.com/v1/api/jobs"
 
@@ -36,7 +36,7 @@ export class JobsAdapter extends DiscoveryAdapter {
           app_id: appId,
           app_key: this.config.apiKey,
           what: params.query,
-          max_results: this.config.maxResults,
+          max_results: this.config.maxResults || 20,
         },
       })
 
@@ -46,6 +46,7 @@ export class JobsAdapter extends DiscoveryAdapter {
         metadata: {
           searchQuery: params.query,
           resultCount: results.length,
+          source: "adzuna",
         },
       }
     } catch (error) {
@@ -69,13 +70,28 @@ export class JobsAdapter extends DiscoveryAdapter {
 
         const name = item.company || domain?.replace(/^www\./, "").replace(/\..*/, "") || "Unknown"
 
+        let signal: string = SignalType.HIRING
+        const titleLower = item.title?.toLowerCase() || ""
+        const descLower = item.description?.toLowerCase() || ""
+        
+        if (titleLower.includes("engineer") || titleLower.includes("developer") || titleLower.includes("tech") || titleLower.includes("software")) {
+          signal = "hiring_engineer" as string
+        } else if (titleLower.includes("sales") || titleLower.includes("account") || titleLower.includes("revenue") || titleLower.includes("executive")) {
+          signal = "hiring_sales" as string
+        } else if (titleLower.includes("remote") || titleLower.includes("work from home") || titleLower.includes("anywhere")) {
+          signal = "remote_hiring" as string
+        }
+
+        const location = item.location || ""
+        const isRemote = location.toLowerCase().includes("remote") || location.toLowerCase().includes("work from home")
+
         return this.createOpportunity({
           name,
           domain,
           source: this.source,
-          signal: SignalType.HIRING,
+          signal: isRemote ? SignalType.REMOTE_HIRING : signal,
           sub_signal: "job_posting",
-          confidence: 0.7,
+          confidence: 0.75,
           metadata: {
             title: item.title,
             location: item.location,

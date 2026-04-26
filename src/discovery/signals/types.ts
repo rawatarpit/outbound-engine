@@ -12,19 +12,37 @@ export const SignalType = {
   PARTNERSHIP: "partnership",
   TECH_USAGE: "tech_usage",
   GROWTH_ACTIVITY: "growth_activity",
+  EXPANSION: "expansion",
+  HIRING_ENGINEER: "hiring_engineer",
+  HIRING_SALES: "hiring_sales",
+  PRODUCT_LAUNCH: "product_launch",
+  TEAM_GROWTH: "team_growth",
+  REMOTE_HIRING: "remote_hiring",
+  FUNDING_ANNOUNCEMENT: "funding_announcement",
+  ACQUISITION: "acquisition",
+  HIRING_AGENCY: "hiring_agency",
 } as const
 
 export type SignalType = typeof SignalType[keyof typeof SignalType]
 
 export const SIGNAL_WEIGHTS: Record<string, number> = {
   hiring: 30,
+  hiring_engineer: 35,
+  hiring_sales: 35,
+  hiring_agency: 25,
   funding: 25,
+  funding_announcement: 28,
+  acquisition: 30,
   launch: 20,
+  product_launch: 22,
   pain: 25,
   advertising: 20,
   partnership: 15,
   tech_usage: 15,
   growth_activity: 10,
+  expansion: 20,
+  team_growth: 18,
+  remote_hiring: 28,
 }
 
 /**
