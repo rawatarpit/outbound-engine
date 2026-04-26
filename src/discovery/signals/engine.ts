@@ -8,6 +8,7 @@ import { SearchAdapter } from "./adapters/search"
 import { CrawleeAdapter } from "./adapters/crawlee"
 import { ForumAdapter } from "./adapters/forum"
 import { SocialAdapter } from "./adapters/social"
+import { ExtraAdapter } from "./adapters/extra"
 
 const logger = pino({ level: "debug" })
 
@@ -65,6 +66,9 @@ function createAdaptersForBrand(
   // SocialAdapter - Twitter/Mastodon/Lemmy alternatives
   adapters.push(new SocialAdapter({}))
 
+  // ExtraAdapter - additional startup databases
+  adapters.push(new ExtraAdapter({}))
+
   return createAdapterRegistry(adapters)
 }
 
@@ -73,6 +77,7 @@ const defaultAdapters = createAdapterRegistry([
   new SearchAdapter({}),
   new ForumAdapter({}),
   new SocialAdapter({}),
+  new ExtraAdapter({}),
 ])
 
 export interface SignalDiscoveryConfig {
