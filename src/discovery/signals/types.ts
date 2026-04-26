@@ -21,6 +21,8 @@ export const SignalType = {
   FUNDING_ANNOUNCEMENT: "funding_announcement",
   ACQUISITION: "acquisition",
   HIRING_AGENCY: "hiring_agency",
+  OUTBOUND_PAIN: "outbound_pain",
+  AUTOMATION_NEED: "automation_need",
 } as const
 
 export type SignalType = typeof SignalType[keyof typeof SignalType]
@@ -43,6 +45,8 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
   expansion: 20,
   team_growth: 18,
   remote_hiring: 28,
+  outbound_pain: 30,
+  automation_need: 28,
 }
 
 /**

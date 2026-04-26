@@ -9,6 +9,7 @@ import { CrawleeAdapter } from "./adapters/crawlee"
 import { ForumAdapter } from "./adapters/forum"
 import { SocialAdapter } from "./adapters/social"
 import { ExtraAdapter } from "./adapters/extra"
+import { LeadAdapter } from "./adapters/leads"
 
 const logger = pino({ level: "debug" })
 
@@ -69,6 +70,9 @@ function createAdaptersForBrand(
   // ExtraAdapter - additional startup databases
   adapters.push(new ExtraAdapter({}))
 
+  // LeadAdapter - for finding potential clients (Reddit, events, podcasts)
+  adapters.push(new LeadAdapter({}))
+
   return createAdapterRegistry(adapters)
 }
 
@@ -78,6 +82,7 @@ const defaultAdapters = createAdapterRegistry([
   new ForumAdapter({}),
   new SocialAdapter({}),
   new ExtraAdapter({}),
+  new LeadAdapter({}),
 ])
 
 export interface SignalDiscoveryConfig {

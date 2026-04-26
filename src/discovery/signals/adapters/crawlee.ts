@@ -40,6 +40,7 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     SignalType.REMOTE_HIRING,
     SignalType.HIRING_AGENCY,
     SignalType.PAIN,
+    SignalType.OUTBOUND_PAIN,
     SignalType.GROWTH_ACTIVITY,
     SignalType.TECH_USAGE,
     SignalType.FUNDING,
@@ -51,6 +52,7 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     SignalType.EXPANSION,
     SignalType.TEAM_GROWTH,
     SignalType.ACQUISITION,
+    SignalType.AUTOMATION_NEED,
   ]
 
   private stealth: boolean

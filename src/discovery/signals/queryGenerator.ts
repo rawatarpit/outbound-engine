@@ -22,6 +22,27 @@ const SIGNAL_QUERY_TEMPLATES: Record<string, string[]> = {
     "remote sales",
     "work from home",
   ],
+  // NEW: Outbound pain - businesses struggling with outreach
+  outbound_pain: [
+    "outbound not working",
+    "cold email not getting responses",
+    "lead gen struggling",
+    "pipeline empty",
+    "prospecting help",
+    "email outreach not converting",
+    "sales pipeline empty",
+    "need leads",
+  ],
+  // NEW: Automation need - seeking tools
+  automation_need: [
+    "automation tool",
+    "zapier alternative",
+    "no-code automation",
+    "workflow tool",
+    "email automation",
+    "sales automation",
+    "marketing automation",
+  ],
   hiring_agency: [
     "hiring marketing agency",
     "need growth agency",
