@@ -409,6 +409,7 @@ export class LeadAdapter extends DiscoveryAdapter {
   }
 
   async fetch(params: AdapterParams): Promise<FetchResult> {
+    this.currentSignal = params.signal as SignalType
     const results = await this.executeSearch(params.query, params.signal)
     return {
       raw: results,
@@ -477,7 +478,7 @@ export class LeadAdapter extends DiscoveryAdapter {
           name: domain || item.title.split(" ").slice(0, 4).join(" "),
           domain,
           source: item.source,
-          signal: item.source,
+          signal: this.currentSignal || item.source,
           confidence: 0.75,
           metadata: { title: item.title, snippet: item.snippet, link: item.link },
         })

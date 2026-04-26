@@ -30,6 +30,7 @@ export abstract class DiscoveryAdapter {
   abstract supportedSignals: (SignalType | string)[]
 
   protected config: z.infer<typeof baseConfigSchema> & AdapterConfig
+  protected currentSignal?: SignalType
 
   constructor(config: AdapterConfig = {}) {
     this.config = { ...baseConfigSchema.parse({}), ...config }
