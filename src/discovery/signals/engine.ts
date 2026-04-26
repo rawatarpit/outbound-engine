@@ -163,6 +163,23 @@ async function storeOpportunities(
 ): Promise<number> {
   if (opportunities.length === 0) return 0
 
+  // Filter out duplicates first by checking existing
+  const domains = opportunities.map(o => o.domain).filter(Boolean)
+  if (domains.length > 0) {
+    const { data: existing } = await supabase
+      .from("opportunities")
+      .select("domain")
+      .eq("brand_id", brandId)
+      .in("domain", domains as string[])
+    
+    if (existing && existing.length > 0) {
+      const existingDomains = new Set(existing.map(e => e.domain))
+      opportunities = opportunities.filter(o => !existingDomains.has(o.domain))
+    }
+  }
+
+  if (opportunities.length === 0) return 0
+
   const rows = opportunities.map((opp) => ({
     brand_id: brandId,
     intent_id: intentId,
@@ -179,13 +196,19 @@ async function storeOpportunities(
 
   const { error } = await supabase
     .from("opportunities")
-    .upsert(rows, {
-      onConflict: "brand_id,domain,source,signal",
-    })
+    .insert(rows)
 
   if (error) {
-    logger.error({ error: error.message, count: rows.length }, "Failed to store opportunities")
-    return 0
+    // Try one by one for conflicts
+    let stored = 0
+    for (const row of rows) {
+      const { error: singleError } = await supabase
+        .from("opportunities")
+        .upsert(row, { onConflict: "brand_id,domain,source,signal" })
+      if (!singleError) stored++
+    }
+    logger.info({ stored }, "Stored opportunities individually")
+    return stored
   }
 
   return opportunities.length

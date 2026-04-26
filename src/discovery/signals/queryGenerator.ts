@@ -3,143 +3,76 @@ import type { BrandProfile } from "../../db/supabase"
 
 const SIGNAL_QUERY_TEMPLATES: Record<string, string[]> = {
   hiring: [
-    "hiring {role} {audience}",
-    "looking for {role} {audience}",
-    "{audience} hiring sales team",
-    "hiring b2b sales rep",
-    "hiring outbound sales",
-    "vacancies {role} {audience}",
-    "job opening {role} {audience}",
-    "seeking {role} {audience}",
+    "hiring sales rep",
+    "hiring sales team",
+    "need sales rep",
   ],
   hiring_sales: [
-    "hiring sales representative {audience}",
-    "looking for account executive",
-    "hiring b2b sales close",
-    "hiring sales development rep",
-    "hiring revenue team {audience}",
-    "seeking outbound sales {audience}",
-    "need sales rep {audience}",
+    "hiring account executive",
+    "hiring sales closer",
+    "need sales representative",
   ],
   hiring_engineer: [
-    "hiring senior engineer {audience}",
-    "looking for full stack developer",
-    "hiring backend engineer {audience}",
-    "seeking devops engineer",
-    "hiring frontend developer {audience}",
-    "need software engineer {audience}",
+    "hiring developer",
+    "hiring engineer",
+    "need developer",
   ],
   remote_hiring: [
-    "remote hiring {role} {audience}",
-    "remote jobs {role}",
-    "work from home hiring {audience}",
-    "distributed team hiring {audience}",
-    "anywhere hiring {role}",
-    "remote-first company hiring",
+    "remote jobs",
+    "remote sales",
+    "work from home",
   ],
   hiring_agency: [
-    "hiring marketing agency {audience}",
-    "looking for growth agency",
-    "need b2b marketing partner",
-    "seeking lead gen agency",
+    "hiring marketing agency",
+    "need growth agency",
   ],
   funding: [
-    "raised seed round {audience}",
-    "Series A funding {audience}",
-    "venture capital {audience}",
-    "recent funding round {audience}",
-    "secured funding {audience}",
-    "Series {round} {audience}",
+    "raised seed round",
+    "series funding",
+    "got funding",
   ],
   funding_announcement: [
-    "{audience} raised {round} funding",
-    "announcing ${round}M round {audience}",
-    "{audience} gets new investment",
-    "{audience} secures {round} million",
-    "just raised {audience} seed",
-    "{audience} venture round",
+    "raised seed",
+    "announced funding",
   ],
   acquisition: [
-    "{audience} acquired",
-    "{audience} acquisition",
-    "{audience} acquired by",
-    "acquired company {audience}",
+    "acquired",
   ],
   launch: [
-    "launched new product {audience}",
-    "just launched {audience}",
-    "announcing new {product} {audience}",
-    "public beta {audience}",
-    "new feature release {audience}",
+    "launched new product",
+    "new feature",
   ],
   product_launch: [
-    "new {product} launch {audience}",
-    "{audience} launching {product}",
-    "{audience} public launch",
-    "{audience} new release",
-    "{audience} beta access",
+    "new product",
+    "public beta",
   ],
   pain: [
-    "struggling with {pain_point}",
-    "tired of {pain_point}",
-    "problem with {pain_point}",
-    "looking for {pain_point} solution",
-    "frustrated with {pain_point}",
-    "need help with {pain_point}",
-    "can't find {pain_point}",
-    "hard to {pain_point}",
-    "best way to {pain_point}",
+    "need help with pipeline",
+    "outbound not working",
+    "lead gen help",
   ],
   advertising: [
-    "running google ads",
-    "hiring marketing agency",
-    "facebook ads agency",
-    "b2b advertising {audience}",
-    "growth marketing {audience}",
-    "performance marketing {audience}",
-    "google ads management {audience}",
-    "linkedin ads {audience}",
+    "google ads",
+    "marketing agency",
   ],
   partnership: [
-    "looking for partners {audience}",
-    "seeking channel partners",
-    "partnership program {audience}",
-    "reseller program {audience}",
-    "partner with {audience}",
-    "seeking referral partners",
-    "partner integration {audience}",
+    "seeking partners",
   ],
   tech_usage: [
-    "using {tech} for {audience}",
-    "implemented {tech} {audience}",
-    "built with {tech}",
-    "{tech} platform {audience}",
-    "switched to {tech} {audience}",
-    "{tech} for sales {audience}",
-    "best {tech} alternative",
+    "using sales tool",
+    "best CRM",
   ],
   growth_activity: [
-    "scaling outbound {audience}",
-    "hired sales team {audience}",
-    "expanding sales team {audience}",
-    "hiring b2b sales {audience}",
-    "growing revenue {audience}",
-    "100% growth year over year {audience}",
-    "scaling team {audience}",
+    "hired sales team",
+    "scaling revenue",
   ],
   expansion: [
-    "expanding to new markets {audience}",
-    "new market entry {audience}",
-    "scaling internationally {audience}",
-    "moving to new market {audience}",
-    "opening new office {audience}",
+    "expanding team",
+    "scaling",
   ],
   team_growth: [
-    "growing team {audience}",
-    "scaling team {audience}",
-    "hiring spurt {audience}",
-    " doubling team {audience}",
-    "rapid team growth {audience}",
+    "growing team",
+    "hiring fast",
   ],
 }
 
@@ -208,46 +141,32 @@ export interface QueryGeneratorConfig {
 export function generateQueries(
   signal: string,
   brand: QueryGeneratorConfig,
-  useSiteFilters: boolean = true,
+  useSiteFilters: boolean = false,
 ): string[] {
   const templates = SIGNAL_QUERY_TEMPLATES[signal]
   if (!templates || templates.length === 0) {
     return []
   }
 
-  const siteFilter = useSiteFilters
-    ? SITE_FILTERS[Math.floor(Math.random() * SITE_FILTERS.length)]
-    : null
-
   const queries: string[] = []
 
-  for (const template of templates) {
-    const query = substituteTemplate(template, {
-      product: brand.product,
-      positioning: brand.positioning,
-      coreOffer: brand.coreOffer,
-      audience: brand.audience,
-      painPoint: brand.painPoints,
-      role: selectRoleVariant(brand.positioning),
-    })
-
-    if (!query) continue
-
-    if (siteFilter) {
-      queries.push(`${query} ${siteFilter}`)
-    } else {
+  for (const template of templates.slice(0, 3)) {
+    // Simple substitution - no complex placeholders
+    let query = template
+      .replace("{role}", "sales rep")
+      .replace("{audience}", brand.audience || "B2B")
+      .replace("{product}", brand.product || "software")
+      .replace("{pain_point}", "pipeline")
+      .replace("{tech}", "HubSpot")
+      .replace("{round}", "A")
+    
+    query = query.replace(/\s+/g, " ").trim()
+    if (query.length > 3) {
       queries.push(query)
     }
-
-    const withRecency = `${query} ${RECENCY_MODIFIERS[Math.floor(Math.random() * RECENCY_MODIFIERS.length)]}`
-    queries.push(withRecency)
-
-    const withIntent = `${HIGH_INTENT_PHRASES[Math.floor(Math.random() * HIGH_INTENT_PHRASES.length)]} ${query}`
-    queries.push(withIntent)
   }
 
-  const deduplicated = [...new Set(queries)]
-  return deduplicated.slice(0, 25)
+  return queries.slice(0, 5)
 }
 
 function substituteTemplate(

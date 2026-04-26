@@ -130,56 +130,38 @@ export class CrawleeAdapter extends DiscoveryAdapter {
   }
 
   private buildSearchUrls(query: string, signal: string): string[] {
-    const encodedQuery = encodeURIComponent(query)
+    const encodedQuery = encodeURIComponent(query.split("site:").slice(0, 1).join("").trim().slice(0, 40))
 
     const urls: string[] = []
 
-    // YC + Startup sources
+    // Only use sites that don't block - RemoteOK and WeWorkRemotely are most reliable
     if (signal === "hiring" || signal === "hiring_sales" || signal === "hiring_engineer" || signal === "remote_hiring") {
       urls.push(
-        `https://ycombinator.com/jobs/?${encodedQuery}`,
-        `https://www.ycombinator.com/apply?=${encodedQuery}`,
-        `https://wellfound.com/join?q=${encodedQuery}`,
-        `https://wellfound.com/startups?q=${encodedQuery}`,
         `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
         `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
-        `https://angel.co/roles?=${encodedQuery}`,
       )
     } else if (signal === "funding" || signal === "funding_announcement") {
       urls.push(
-        `https://news.ycombinator.com/?query=${encodedQuery}&hits=true`,
-        `https://www.ycombinator.com/news?q=${encodedQuery}`,
-        `https://www.indiehackers.com/ask?=${encodedQuery}`,
-        `https://www.crunchbase.com/discover/organizations/latest/${encodedQuery}`,
+        `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
       )
     } else if (signal === "launch" || signal === "product_launch") {
       urls.push(
         `https://www.producthunt.com/search?q=${encodedQuery}`,
         `https://www.indiehackers.com/search?q=${encodedQuery}`,
-        `https://news.ycombinator.com/item?id=${encodedQuery}`,
-        `https://www.producthunt.com/discover?q=${encodedQuery}`,
-      )
-    } else if (signal === "tech_usage" || signal === "pain") {
-      urls.push(
-        `https://news.ycombinator.com/newest?q=${encodedQuery}`,
-        `https://www.indiehackers.com/search?q=${encodedQuery}`,
-        `https://www.indiehackers.com/forum?=${encodedQuery}`,
       )
     } else {
-      // Default: all sources
+      // Default - use only reliable sources
       urls.push(
         `https://www.indiehackers.com/search?q=${encodedQuery}`,
         `https://news.ycombinator.com/newest?q=${encodedQuery}`,
-        `https://ycombinator.com/jobs/?${encodedQuery}`,
         `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
-        `https://wellfound.com/join?q=${encodedQuery}`,
         `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
         `https://www.producthunt.com/search?q=${encodedQuery}`,
-        `https://www.indiehackers.com/ask?q=${encodedQuery}`,
       )
     }
 
-    return urls
+    return urls.slice(0, 4) // Limit to 4 sources
   }
 
   private async crawlUrls(urls: string[]): Promise<CrawleeSearchResult[]> {
