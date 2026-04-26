@@ -23,6 +23,18 @@ export const SignalType = {
   HIRING_AGENCY: "hiring_agency",
   OUTBOUND_PAIN: "outbound_pain",
   AUTOMATION_NEED: "automation_need",
+  // NEW: All brand types
+  AGENCY_LOOKING_CLIENTS: "agency_looking_clients",
+  AGENCY_LOOKING_SPONSORS: "agency_looking_sponsors",
+  PRODUCT_GROWTH: "product_growth",
+  PRODUCT_SPONSORS: "product_sponsors",
+  EVENT_SPONSORS: "event_sponsors",
+  EVENT_ATTENDEES: "event_attendees",
+  INFLUENCER_COLLAB: "influencer_collab",
+  PODCAST_SPONSORS: "podcast_sponsors",
+  NEWSLETTER_SPONSORS: "newsletter_sponsors",
+  STARTUP_GROWTH: "startup_growth",
+  SAAS_SEARCH: "saas_search",
 } as const
 
 export type SignalType = typeof SignalType[keyof typeof SignalType]
@@ -47,6 +59,18 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
   remote_hiring: 28,
   outbound_pain: 30,
   automation_need: 28,
+  // All brand types
+  agency_looking_clients: 35,
+  agency_looking_sponsors: 30,
+  product_growth: 28,
+  product_sponsors: 25,
+  event_sponsors: 30,
+  event_attendees: 25,
+  influencer_collab: 25,
+  podcast_sponsors: 28,
+  newsletter_sponsors: 28,
+  startup_growth: 30,
+  saas_search: 30,
 }
 
 /**

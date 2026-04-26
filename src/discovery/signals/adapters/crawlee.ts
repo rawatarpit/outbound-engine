@@ -53,6 +53,17 @@ export class CrawleeAdapter extends DiscoveryAdapter {
     SignalType.TEAM_GROWTH,
     SignalType.ACQUISITION,
     SignalType.AUTOMATION_NEED,
+    SignalType.AGENCY_LOOKING_CLIENTS,
+    SignalType.AGENCY_LOOKING_SPONSORS,
+    SignalType.PRODUCT_GROWTH,
+    SignalType.PRODUCT_SPONSORS,
+    SignalType.EVENT_SPONSORS,
+    SignalType.EVENT_ATTENDEES,
+    SignalType.INFLUENCER_COLLAB,
+    SignalType.PODCAST_SPONSORS,
+    SignalType.NEWSLETTER_SPONSORS,
+    SignalType.STARTUP_GROWTH,
+    SignalType.SAAS_SEARCH,
   ]
 
   private stealth: boolean
