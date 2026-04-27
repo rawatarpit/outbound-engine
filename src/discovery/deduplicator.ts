@@ -2,41 +2,62 @@ import type { DiscoveryCompany, DiscoveryContact } from "./types"
 import { normalizeDomain, normalizeEmail } from "./normalizer"
 
 /* =========================================================
-   DEDUPLICATION RESULT TYPES
+   DEDUPLICATION RESULT TYPES - ALIGNED WITH SUPABASE SCHEMA
 ========================================================= */
 
 export interface DeduplicatedCompany {
   brand_id: string
-  source_id: string
+  source_id: string | null
   name: string | null
   domain: string
   website: string | null
-  raw_payload: any
+  raw_payload: unknown | null
   processed: boolean
   ingested: boolean
-  risk: string | null
+  dead_letter: boolean
+  retry_count: number
+  next_attempt_at: string | null
+  error: string | null
+  risk: "SAFE_API" | "MODERATE_PUBLIC" | "HIGH_SCRAPE" | null
   confidence: number | null
   intent_score: number | null
   requires_enrichment: boolean
+  enrichment_status: "pending" | "locked" | "enriched" | "failed" | "dead"
+  enrichment_attempts: number
+  last_enrichment_at: string | null
+  enrichment_source: string | null
+  enrichment_reasoning: unknown | null
+  enrichment_error: string | null
 }
 
 export interface DeduplicatedContact {
   brand_id: string
-  source_id: string
-  discovered_company_id: string
+  source_id: string | null
+  discovered_company_id: string | null
   first_name: string | null
   last_name: string | null
   full_name: string | null
-  email: string
+  email: string | null
   title: string | null
   linkedin_url: string | null
-  raw_payload: any
+  raw_payload: unknown | null
   processed: boolean
   ingested: boolean
-  risk: string | null
+  dead_letter: boolean
+  retry_count: number
+  next_attempt_at: string | null
+  error: string | null
+  domain: string | null
+  risk: "SAFE_API" | "MODERATE_PUBLIC" | "HIGH_SCRAPE" | null
   confidence: number | null
   intent_score: number | null
   requires_enrichment: boolean
+  enrichment_status: "pending" | "locked" | "enriched" | "failed" | "dead"
+  enrichment_attempts: number
+  last_enrichment_at: string | null
+  enrichment_source: string | null
+  enrichment_reasoning: unknown | null
+  enrichment_error: string | null
 }
 
 /* =========================================================
@@ -180,7 +201,6 @@ export function deduplicateCompanies(
   sourceId: string,
   brandId: string
 ): DeduplicatedCompany[] {
-  // Map: domain -> best record
   const domainMap = new Map<string, DeduplicatedCompany>()
 
   for (const company of companies) {
@@ -198,16 +218,25 @@ export function deduplicateCompanies(
         name: company.name ?? null,
         domain,
         website: (company as any).website ?? null,
-        raw_payload: company.raw ?? company,
+        raw_payload: company.raw ?? null,
         processed: false,
         ingested: false,
-        risk: (company.risk as string) ?? null,
+        dead_letter: false,
+        retry_count: 0,
+        next_attempt_at: null,
+        error: null,
+        risk: (company.risk as "SAFE_API" | "MODERATE_PUBLIC" | "HIGH_SCRAPE") ?? null,
         confidence: company.confidence ?? null,
         intent_score: company.intent_score ?? null,
         requires_enrichment: company.requires_enrichment ?? true,
+        enrichment_status: "pending",
+        enrichment_attempts: 0,
+        last_enrichment_at: null,
+        enrichment_source: null,
+        enrichment_reasoning: null,
+        enrichment_error: null,
       })
     } else {
-      // Prefer higher confidence
       const existingConf = existing.confidence ?? 0
       const newConf = company.confidence ?? 0
 
@@ -247,10 +276,10 @@ export function deduplicateContacts(
     const domain = normalizeDomain(contact.domain)
     if (!domain) continue
 
-    const discoveredCompanyId = companyIdByDomain.get(domain)
-    if (!discoveredCompanyId) continue
+    const discoveredCompanyId = companyIdByDomain.get(domain) ?? null
 
     const email = contact.email ? normalizeEmail(contact.email) : null
+
     if (!email) continue
 
     const key = `${brandId}:${email}`
@@ -266,13 +295,24 @@ export function deduplicateContacts(
       email,
       title: contact.title ?? null,
       linkedin_url: contact.linkedin_url ?? null,
-      raw_payload: contact.raw ?? contact,
+      raw_payload: contact.raw ?? null,
       processed: false,
       ingested: false,
-      risk: (contact.risk as string) ?? null,
+      dead_letter: false,
+      retry_count: 0,
+      next_attempt_at: null,
+      error: null,
+      domain: domain,
+      risk: (contact.risk as "SAFE_API" | "MODERATE_PUBLIC" | "HIGH_SCRAPE") ?? null,
       confidence: contact.confidence ?? null,
       intent_score: contact.intent_score ?? null,
       requires_enrichment: contact.requires_enrichment ?? true,
+      enrichment_status: "pending",
+      enrichment_attempts: 0,
+      last_enrichment_at: null,
+      enrichment_source: null,
+      enrichment_reasoning: null,
+      enrichment_error: null,
     })
   }
 
@@ -310,10 +350,20 @@ export function transformGithubReposToCompanies(
       raw_payload: repo,
       processed: false,
       ingested: false,
+      dead_letter: false,
+      retry_count: 0,
+      next_attempt_at: null,
+      error: null,
       risk: "MODERATE_PUBLIC",
       confidence: Math.min((repo.stargazers_count ?? 0) / 10000, 1) || 0.7,
       intent_score: (repo.stargazers_count ?? 0) > 1000 ? 1 : 0.5,
       requires_enrichment: true,
+      enrichment_status: "pending",
+      enrichment_attempts: 0,
+      last_enrichment_at: null,
+      enrichment_source: null,
+      enrichment_reasoning: null,
+      enrichment_error: null,
     })
   }
 

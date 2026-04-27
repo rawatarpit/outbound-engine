@@ -11,10 +11,16 @@ const DEFAULT_USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
 ]
 
-const MAX_RETRIES = 3
-const MAX_CONCURRENCY = 2
+const MAX_RETRIES = 2
+const MAX_CONCURRENCY = 1
+
+function randomDelay(): number {
+  return Math.floor(Math.random() * 3000) + 2000
+}
 
 interface CrawleeAdapterConfig extends AdapterConfig {
   stealth?: boolean
@@ -147,9 +153,9 @@ export class CrawleeAdapter extends DiscoveryAdapter {
 
     const urls: string[] = []
 
-    // Only use sites that don't block - RemoteOK and WeWorkRemotely are most reliable
     if (signal === "hiring" || signal === "hiring_sales" || signal === "hiring_engineer" || signal === "remote_hiring") {
       urls.push(
+        `https://old.reddit.com/search?q=${encodedQuery}&sort=new`,
         `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
         `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
       )
@@ -157,48 +163,76 @@ export class CrawleeAdapter extends DiscoveryAdapter {
       urls.push(
         `https://news.ycombinator.com/newest?q=${encodedQuery}`,
         `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://old.reddit.com/search?q=${encodedQuery}&sort=new`,
       )
     } else if (signal === "launch" || signal === "product_launch") {
       urls.push(
         `https://www.producthunt.com/search?q=${encodedQuery}`,
         `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://old.reddit.com/search?q=${encodedQuery}&sort=new`,
+      )
+    } else if (signal === "pain" || signal === "outbound_pain") {
+      urls.push(
+        `https://old.reddit.com/search?q=${encodedQuery}&sort=new`,
+        `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
       )
     } else {
-      // Default - use only reliable sources
       urls.push(
-        `https://www.indiehackers.com/search?q=${encodedQuery}`,
+        `https://old.reddit.com/search?q=${encodedQuery}&sort=new`,
         `https://news.ycombinator.com/newest?q=${encodedQuery}`,
+        `https://www.indiehackers.com/search?q=${encodedQuery}`,
         `https://remoteok.com/remote-jobs?q=${encodedQuery}`,
-        `https://weworkremotely.com/categories/remote-jobs?q=${encodedQuery}`,
-        `https://www.producthunt.com/search?q=${encodedQuery}`,
       )
     }
 
-    return urls.slice(0, 4) // Limit to 4 sources
+    return urls.slice(0, 3)
   }
 
   private async crawlUrls(urls: string[]): Promise<CrawleeSearchResult[]> {
     const allResults: CrawleeSearchResult[] = []
+    const userAgent = this.userAgents[Math.floor(Math.random() * this.userAgents.length)]
 
     const crawler = new PlaywrightCrawler({
       maxConcurrency: this.maxConcurrency,
       maxRequestRetries: MAX_RETRIES,
 
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+
       launchContext: {
         launchOptions: {
           headless: true,
-          userAgent: this.userAgents[Math.floor(Math.random() * this.userAgents.length)],
+          userAgent: userAgent,
         },
       },
 
       async requestHandler({ page, request }) {
         const url = request.url
 
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Referer': 'https://www.google.com/',
+        })
+
+        await page.setViewportSize({ width: 1920, height: 1080 })
+
+        const delay = randomDelay()
+        await page.waitForTimeout(delay)
+
         try {
-          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+          await page.waitForLoadState("domcontentloaded", { timeout: 20000 })
         } catch {
           logger.warn({ url }, "Page load timeout")
         }
+
+        await page.waitForTimeout(1000)
 
         const title = await page.title()
         const html = await page.content()
@@ -318,6 +352,7 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const results: CrawleeSearchResult[] = []
   const $ = cheerio.load(html)
 
+  const isOldReddit = url.includes("old.reddit.com")
   const isIH = url.includes("indiehackers.com")
   const isHN = url.includes("ycombinator.com")
   const isRemoteOk = url.includes("remoteok.com")
@@ -325,6 +360,43 @@ function extractSearchResults(html: string, url: string): CrawleeSearchResult[] 
   const isWeWorkRemotely = url.includes("weworkremotely.com")
   const isProductHunt = url.includes("producthunt.com")
   const isAngel = url.includes("angel.co")
+
+  if (isOldReddit) {
+    $("div.thing").each((_i, el) => {
+      const $el = $(el)
+      const title = $el.attr("data-event-action") === "link" 
+        ? $el.find("a.title").text().trim() 
+        : $el.find("a.title").first().text().trim()
+      const link = $el.find("a.title").attr("href") || ""
+      const domain = $el.find("span.domain").text().trim()
+      const score = $el.find("div.score").text().trim()
+      const comments = $el.find("a.comments").text().trim()
+      
+      if (title && title.length > 3) {
+        results.push({
+          title: title.slice(0, 150),
+          link: link.startsWith("http") ? link : `https://old.reddit.com${link}`,
+          snippet: `Score: ${score} | ${comments}`,
+          source: "reddit",
+        })
+      }
+    })
+    $("a.title").each((_i, el) => {
+      const $el = $(el)
+      const title = $el.text().trim()
+      const link = $el.attr("href") || ""
+      
+      if (title && title.length > 3 && !results.find(r => r.title === title)) {
+        results.push({
+          title: title.slice(0, 150),
+          link: link.startsWith("http") ? link : `https://old.reddit.com${link}`,
+          snippet: "",
+          source: "reddit",
+        })
+      }
+    })
+    return results
+  }
 
   if (isIH) {
     // Indie Hackers - posts, questions, forum

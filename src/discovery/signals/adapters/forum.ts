@@ -1,3 +1,4 @@
+import { PlaywrightCrawler } from "@crawlee/playwright"
 import { DiscoveryAdapter, type AdapterParams, type FetchResult, type AdapterConfig } from "../adapter"
 import { SignalType } from "../types"
 import type { Opportunity } from "../types"
@@ -19,347 +20,534 @@ interface ForumAdapterConfig extends AdapterConfig {
   maxResults?: number
 }
 
+const DEFAULT_USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
+
+const MAX_RETRIES = 2
+
+function randomDelay(): number {
+  return Math.floor(Math.random() * 3000) + 2000
+}
+
 // Dev.to Community
 async function fetchDevToSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://dev.to/search?q=${encodeURIComponent(query)}`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("div.search-result, article.search-result, a[href*='/']").each((i, el) => {
+          if (i > 20) return
+          const $el = $(el)
+          const title = $el.find("h3, h2, a").first().text().trim()
+          const href = $el.find("a").first().attr("href") || ""
+          const snippet = $el.find("p, .description, .excerpt").first().text().trim().slice(0, 200)
+
+          if (title && title.length > 3) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://dev.to${href}`,
+              snippet,
+              source: "devto",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("div.search-result, article.search-result, a[href*='/']").each((i, el) => {
-      if (i > 20) return
-      const $el = $(el)
-      const title = $el.find("h3, h2, a").first().text().trim()
-      const href = $el.find("a").first().attr("href") || ""
-      const snippet = $el.find("p, .description, .excerpt").first().text().trim().slice(0, 200)
-      
-      if (title && title.length > 3) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://dev.to${href}`,
-          snippet,
-          source: "devto",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "DEVTO_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "DEVTO_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // Stack Overflow
 async function fetchStackOverflowSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://stackoverflow.com/search?q=${encodeURIComponent(query)}&tab=Newest`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $(".s-post-summary, .question-summary").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.find(".s-post-summary--content h3 a, .question-hyperlink").first().text().trim()
+          const href = $el.find(".s-post-summary--content h3 a, .question-hyperlink").attr("href") || ""
+          const snippet = $el.find(".s-post-summary--content .excerpt, .excerpt").first().text().trim().slice(0, 150)
+
+          if (title && title.length > 3) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://stackoverflow.com${href}`,
+              snippet,
+              source: "stackoverflow",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $(".s-post-summary, .question-summary").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.find(".s-post-summary--content h3 a, .question-hyperlink").first().text().trim()
-      const href = $el.find(".s-post-summary--content h3 a, .question-hyperlink").attr("href") || ""
-      const snippet = $el.find(".s-post-summary--content .excerpt, .excerpt").first().text().trim().slice(0, 150)
-      
-      if (title && title.length > 3) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://stackoverflow.com${href}`,
-          snippet,
-          source: "stackoverflow",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "STACKOVERFLOW_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "STACKOVERFLOW_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // HackerNoon
 async function fetchHackerNoonSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://hackernoon.com/search?q=${encodeURIComponent(query)}`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("a[data-testid='post-card-title'], h3 a, .post-card a").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.text().trim()
+          const href = $el.attr("href") || ""
+          const parent = $el.closest("article, .post-card")
+          const snippet = parent.find("p, .excerpt").first().text().trim().slice(0, 150)
+
+          if (title && title.length > 3) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://hackernoon.com${href}`,
+              snippet,
+              source: "hackernoon",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("a[data-testid='post-card-title'], h3 a, .post-card a").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.text().trim()
-      const href = $el.attr("href") || ""
-      const parent = $el.closest("article, .post-card")
-      const snippet = parent.find("p, .excerpt").first().text().trim().slice(0, 150)
-      
-      if (title && title.length > 3) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://hackernoon.com${href}`,
-          snippet,
-          source: "hackernoon",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "HACKERNOON_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "HACKERNOON_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // Substack
 async function fetchSubstackSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://substack.com/search?q=${encodeURIComponent(query)}`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("a[href*='/p/'], h3 a").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.text().trim()
+          const href = $el.attr("href") || ""
+
+          if (title && title.length > 3) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://substack.com${href}`,
+              snippet: $el.parent().text().trim().slice(0, 150),
+              source: "substack",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("a[href*='/p/'], h3 a").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.text().trim()
-      const href = $el.attr("href") || ""
-      
-      if (title && title.length > 3) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://substack.com${href}`,
-          snippet: $el.parent().text().trim().slice(0, 150),
-          source: "substack",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "SUBSTACK_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "SUBSTACK_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // GitHub Topics/Repos
 async function fetchGitHubSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://github.com/search?q=${encodeURIComponent(query)}&type=repositories`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("a[href*='/'], .repo-list-item a").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.text().trim()
+          const href = $el.attr("href") || ""
+
+          if (href?.includes("/") && !href.includes("search") && title && title.length > 2) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://github.com${href}`,
+              snippet: $el.parent().text().trim().slice(0, 150),
+              source: "github",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("a[href*='/'], .repo-list-item a").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.text().trim()
-      const href = $el.attr("href") || ""
-      
-      if (href?.includes("/") && !href.includes("search") && title && title.length > 2) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://github.com${href}`,
-          snippet: $el.parent().text().trim().slice(0, 150),
-          source: "github",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "GITHUB_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "GITHUB_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // G2 Software Reviews
 async function fetchG2Search(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://www.g2.com/search?q=${encodeURIComponent(query)}`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("a[href*='/products/'], h3 a, .product-name a").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.text().trim()
+          const href = $el.attr("href") || ""
+          const parent = $el.closest("div, article")
+          const snippet = parent.find("p, .description").first().text().trim().slice(0, 150)
+
+          if (title && title.length > 2) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://www.g2.com${href}`,
+              snippet,
+              source: "g2",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("a[href*='/products/'], h3 a, .product-name a").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.text().trim()
-      const href = $el.attr("href") || ""
-      const parent = $el.closest("div, article")
-      const snippet = parent.find("p, .description").first().text().trim().slice(0, 150)
-      
-      if (title && title.length > 2) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://www.g2.com${href}`,
-          snippet,
-          source: "g2",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "G2_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "G2_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // Capterra
 async function fetchCapterraSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
   const searchUrl = `https://www.capterra.com/search/?q=${encodeURIComponent(query)}`
-  
+
   try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    const crawler = new PlaywrightCrawler({
+      maxConcurrency: 1,
+      maxRequestRetries: MAX_RETRIES,
+      preNavigationHooks: [
+        async ({ page }) => {
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+          })
+        }
+      ],
+      launchContext: {
+        launchOptions: { headless: true, userAgent },
+      },
+      async requestHandler({ page }) {
+        await page.setExtraHTTPHeaders({
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        })
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        await page.waitForTimeout(randomDelay())
+
+        try {
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 })
+        } catch {}
+        await page.waitForTimeout(1000)
+
+        const html = await page.content()
+        const $ = cheerio.load(html)
+
+        $("a[href*='/reviews/'], h3 a, .product-name").each((i, el) => {
+          if (i > 15) return
+          const $el = $(el)
+          const title = $el.text().trim()
+          const href = $el.attr("href") || ""
+
+          if (title && title.length > 2) {
+            results.push({
+              title: title.slice(0, 150),
+              link: href.startsWith("http") ? href : `https://www.capterra.com${href}`,
+              snippet: $el.parent().text().trim().slice(0, 150),
+              source: "capterra",
+            })
+          }
+        })
       },
     })
-    
-    if (!response.ok) return []
-    
-    const html = await response.text()
-    const $ = cheerio.load(html)
-    
-    $("a[href*='/reviews/'], h3 a, .product-name").each((i, el) => {
-      if (i > 15) return
-      const $el = $(el)
-      const title = $el.text().trim()
-      const href = $el.attr("href") || ""
-      
-      if (title && title.length > 2) {
-        results.push({
-          title: title.slice(0, 150),
-          link: href.startsWith("http") ? href : `https://www.capterra.com${href}`,
-          snippet: $el.parent().text().trim().slice(0, 150),
-          source: "capterra",
-        })
-      }
-    })
-    
+
+    await crawler.run([searchUrl])
     logger.info({ stage: "CAPTERRA_SUCCESS", query, count: results.length })
   } catch (error) {
     logger.error({ stage: "CAPTERRA_ERROR", query, error })
   }
-  
+
   return results
 }
 
 // Twitter/X Search (via Nitter for alternatives)
 async function fetchTwitterSearch(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
-  // Using nitter instances as alternative
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
+
   const nitterInstances = [
     "nitter.privacydev.net",
     "nitter.poast.org",
     "nitter.onediv.dev",
   ]
-  
+
   for (const instance of nitterInstances.slice(0, 1)) {
     const searchUrl = `https://${instance}/search?q=${encodeURIComponent(query)}&f=users`
-    
+
     try {
-      const response = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      const crawler = new PlaywrightCrawler({
+        maxConcurrency: 1,
+        maxRequestRetries: MAX_RETRIES,
+        preNavigationHooks: [
+          async ({ page }) => {
+            await page.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+            })
+          }
+        ],
+        launchContext: {
+          launchOptions: { headless: true, userAgent },
         },
-        signal: AbortSignal.timeout(5000),
-      })
-      
-      if (!response.ok) continue
-      
-      const html = await response.text()
-      const $ = cheerio.load(html)
-      
-      $("a[href*='/'], .tweet-link, .username").each((i, el) => {
-        if (i > 10) return
-        const $el = $(el)
-        const text = $el.text().trim()
-        const href = $el.attr("href") || ""
-        
-        if (href?.includes("/") && text && text.length > 1 && text.length < 50) {
-          results.push({
-            title: `@${text.replace("@", "")}`,
-            link: `https://twitter.com${href}`,
-            snippet: $el.parent().text().trim().slice(0, 150),
-            source: "twitter",
+        async requestHandler({ page }) {
+          await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.google.com/',
           })
-        }
+          await page.setViewportSize({ width: 1920, height: 1080 })
+          await page.waitForTimeout(randomDelay())
+
+          try {
+            await page.waitForLoadState("domcontentloaded", { timeout: 10000 })
+          } catch {}
+          await page.waitForTimeout(1000)
+
+          const html = await page.content()
+          const $ = cheerio.load(html)
+
+          $("a[href*='/'], .tweet-link, .username").each((i, el) => {
+            if (i > 10) return
+            const $el = $(el)
+            const text = $el.text().trim()
+            const href = $el.attr("href") || ""
+
+            if (href?.includes("/") && text && text.length > 1 && text.length < 50) {
+              results.push({
+                title: `@${text.replace("@", "")}`,
+                link: `https://twitter.com${href}`,
+                snippet: $el.parent().text().trim().slice(0, 150),
+                source: "twitter",
+              })
+            }
+          })
+        },
       })
-      
+
+      await crawler.run([searchUrl])
+
       if (results.length > 0) break
     } catch (error) {
       logger.debug({ stage: "TWITTER_ERROR", instance, query })
     }
   }
-  
+
   logger.info({ stage: "TWITTER_SUCCESS", query, count: results.length })
   return results
 }
@@ -367,45 +555,58 @@ async function fetchTwitterSearch(query: string): Promise<ForumResult[]> {
 // SaaS Reviews & Directories
 async function fetchSaaSDirectories(query: string): Promise<ForumResult[]> {
   const results: ForumResult[] = []
-  
-  // GetAlfred
-  try {
-    const url = `https://getalfred.com/search/?q=${encodeURIComponent(query)}`
-    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } })
-    if (response.ok) {
-      const html = await response.text()
-      const $ = cheerio.load(html)
-      $("a[href*='/'], h3").each((i, el) => {
-        if (i > 8) return
-        const $el = $(el)
-        const title = $el.text().trim()
-        const href = $el.attr("href") || ""
-        if (title && title.length > 2) {
-          results.push({ title, link: href, snippet: "", source: "getalfred" })
-        }
+  const userAgent = DEFAULT_USER_AGENTS[Math.floor(Math.random() * DEFAULT_USER_AGENTS.length)]
+
+  const directories = [
+    { name: "getalfred", url: `https://getalfred.com/search/?q=${encodeURIComponent(query)}` },
+    { name: "switchboard", url: `https://www.switchboard.io/search?q=${encodeURIComponent(query)}` },
+  ]
+
+  for (const dir of directories) {
+    try {
+      const crawler = new PlaywrightCrawler({
+        maxConcurrency: 1,
+        maxRequestRetries: 1,
+        preNavigationHooks: [
+          async ({ page }) => {
+            await page.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+            })
+          }
+        ],
+        launchContext: {
+          launchOptions: { headless: true, userAgent },
+        },
+        async requestHandler({ page }) {
+          await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.google.com/',
+          })
+          await page.waitForTimeout(randomDelay())
+
+          try {
+            await page.waitForLoadState("domcontentloaded", { timeout: 10000 })
+          } catch {}
+
+          const html = await page.content()
+          const $ = cheerio.load(html)
+
+          $("a[href*='/'], h3").each((i, el) => {
+            if (i > 8) return
+            const $el = $(el)
+            const title = $el.text().trim()
+            const href = $el.attr("href") || ""
+            if (title && title.length > 2) {
+              results.push({ title, link: href, snippet: "", source: dir.name })
+            }
+          })
+        },
       })
-    }
-  } catch {}
-  
-  // Switchboard
-  try {
-    const url = `https://www.switchboard.io/search?q=${encodeURIComponent(query)}`
-    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } })
-    if (response.ok) {
-      const html = await response.text()
-      const $ = cheerio.load(html)
-      $("a[href*='/']").each((i, el) => {
-        if (i > 8) return
-        const $el = $(el)
-        const title = $el.text().trim()
-        const href = $el.attr("href") || ""
-        if (title && title.length > 2) {
-          results.push({ title, link: href, snippet: "", source: "switchboard" })
-        }
-      })
-    }
-  } catch {}
-  
+
+      await crawler.run([dir.url])
+    } catch {}
+  }
+
   return results
 }
 

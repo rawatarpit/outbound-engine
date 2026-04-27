@@ -1,7 +1,7 @@
-import type {
-  DiscoveryCompany,
-  DiscoveryContact,
-  DiscoveryRisk
+import {
+  DiscoveryRisk,
+  type DiscoveryCompany,
+  type DiscoveryContact,
 } from "../../types"
 
 import {
@@ -9,8 +9,7 @@ import {
   normalizeEmail
 } from "../../normalizer"
 
-const CSV_RISK: DiscoveryRisk =
-  "SAFE_API" as DiscoveryRisk
+const CSV_RISK: DiscoveryRisk = DiscoveryRisk.SAFE_API
 
 export function transformCsvRow(
   row: Record<string, string>,
@@ -60,7 +59,12 @@ export function transformCsvRow(
         confidence: 0.9,
         intent_score: 0.5,
         requires_enrichment: false,
-        raw: row
+        raw: row,
+        first_name: null,
+        last_name: null,
+        full_name: null,
+        title: null,
+        linkedin_url: null,
       }
     }
   }

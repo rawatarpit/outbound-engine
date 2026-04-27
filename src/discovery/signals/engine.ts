@@ -168,6 +168,11 @@ async function storeOpportunities(
 ): Promise<number> {
   if (opportunities.length === 0) return 0
 
+  logger.debug(
+    { brandId, intentId, count: opportunities.length },
+    "Attempting to store opportunities"
+  )
+
   // Filter out duplicates first by checking existing
   const domains = opportunities.map(o => o.domain).filter(Boolean)
   if (domains.length > 0) {
@@ -199,11 +204,21 @@ async function storeOpportunities(
     metadata: opp.metadata ?? {},
   }))
 
+  logger.info(
+    { brandId, intentId, rowCount: rows.length, sample: rows[0] },
+    "INSERT_PAYLOAD"
+  )
+
   const { error } = await supabase
     .from("opportunities")
     .insert(rows)
 
   if (error) {
+    logger.error(
+      { brandId, intentId, error: error.message, code: error.code },
+      "Insert failed, trying individually"
+    )
+
     // Try one by one for conflicts
     let stored = 0
     for (const row of rows) {
@@ -212,9 +227,14 @@ async function storeOpportunities(
         .upsert(row, { onConflict: "brand_id,domain,source,signal" })
       if (!singleError) stored++
     }
-    logger.info({ stored }, "Stored opportunities individually")
+    logger.info({ stored, attempted: rows.length }, "Stored opportunities individually")
     return stored
   }
+
+  logger.info(
+    { brandId, intentId, inserted: opportunities.length },
+    "Opportunities inserted successfully"
+  )
 
   return opportunities.length
 }
@@ -249,6 +269,8 @@ export async function executeSignalDiscovery(
   config: SignalDiscoveryConfig
 ): Promise<{ opportunities: number; errors: number }> {
   const start = Date.now()
+  let queriesGenerated = 0
+  let scrapedCount = 0
 
   let totalOpportunities = 0
   let totalErrors = 0
@@ -289,6 +311,7 @@ export async function executeSignalDiscovery(
         audience: brand.audience,
         painPoints: brand.objection_guidelines,
       })
+      queriesGenerated += queries.length
 
       for (const signal of signals) {
         const signalAdapters = getAdaptersForSignal(adapters, signal)
@@ -300,31 +323,52 @@ export async function executeSignalDiscovery(
 
         for (const adapter of signalAdapters) {
           for (const query of queries.slice(0, 5)) {
-            const rawOpps = await fetchAndNormalize(adapter, query, signal)
+            try {
+              const rawOpps = await fetchAndNormalize(adapter, query, signal)
+              scrapedCount += rawOpps.length
 
-            const scoredOpps = rawOpps.map(opp => ({
-              ...opp,
-              score: calculateScore(opp, SIGNAL_WEIGHTS[opp.signal] ?? 10),
-            }))
+              if (rawOpps.length === 0) {
+                logger.warn({ adapter: adapter.source, query, signal }, "No results from adapter")
+                continue
+              }
 
-            const stored = await storeOpportunities(
-              config.brandId,
-              intent.id,
-              scoredOpps
-            )
+              const scoredOpps = rawOpps.map(opp => ({
+                ...opp,
+                score: calculateScore(opp, SIGNAL_WEIGHTS[opp.signal] ?? 10),
+              }))
 
-            if (stored > 0) {
-              await triggerEnrichment(config.brandId, scoredOpps)
+              const stored = await storeOpportunities(
+                config.brandId,
+                intent.id,
+                scoredOpps
+              )
+
+              if (stored > 0) {
+                await triggerEnrichment(config.brandId, scoredOpps)
+              }
+
+              totalOpportunities += stored
+            } catch (err) {
+              totalErrors++
+              logger.error(
+                { adapter: adapter.source, query, signal, error: err instanceof Error ? err.message : "Unknown" },
+                "Adapter fetch failed"
+              )
             }
-
-            totalOpportunities += stored
           }
         }
       }
     }
 
     logger.info(
-      { brandId: config.brandId, duration: Date.now() - start, totalOpportunities },
+      {
+        brandId: config.brandId,
+        duration: Date.now() - start,
+        queries_generated: queriesGenerated,
+        scraped_count: scrapedCount,
+        extracted_count: totalOpportunities,
+        inserted_count: totalOpportunities,
+      },
       "Signal discovery completed"
     )
 

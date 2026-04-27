@@ -1,155 +1,199 @@
 import { SignalType } from "./types"
 import type { BrandProfile } from "../../db/supabase"
 
-const SIGNAL_QUERY_TEMPLATES: Record<string, string[]> = {
-  hiring: [
-    "hiring sales rep",
-    "hiring sales team",
-    "need sales rep",
-  ],
-  hiring_sales: [
-    "hiring account executive",
-    "hiring sales closer",
-    "need sales representative",
-  ],
-  hiring_engineer: [
-    "hiring developer",
-    "hiring engineer",
-    "need developer",
-  ],
-  remote_hiring: [
-    "remote jobs",
-    "remote sales",
-    "work from home",
-  ],
-  // NEW: Outbound pain - businesses struggling with outreach
-  outbound_pain: [
-    "outbound not working",
-    "cold email not getting responses",
-    "lead gen struggling",
-    "pipeline empty",
-    "prospecting help",
-    "email outreach not converting",
-    "sales pipeline empty",
-    "need leads",
-  ],
-  // NEW: Automation need - seeking tools
-  automation_need: [
-    "automation tool",
-    "zapier alternative",
-    "no-code automation",
-    "workflow tool",
-    "email automation",
-    "sales automation",
-    "marketing automation",
-  ],
-  hiring_agency: [
-    "hiring marketing agency",
-    "need growth agency",
-  ],
-  funding: [
-    "raised seed round",
-    "series funding",
-    "got funding",
-  ],
-  funding_announcement: [
-    "raised seed",
-    "announced funding",
-  ],
-  acquisition: [
-    "acquired",
-  ],
-  launch: [
-    "launched new product",
-    "new feature",
-  ],
-  product_launch: [
-    "new product",
-    "public beta",
-  ],
-  pain: [
-    "need help with pipeline",
-    "outbound not working",
-    "lead gen help",
-  ],
-  advertising: [
-    "google ads",
-    "marketing agency",
-  ],
-  partnership: [
-    "seeking partners",
-  ],
-  tech_usage: [
-    "using sales tool",
-    "best CRM",
-  ],
-  growth_activity: [
-    "hired sales team",
-    "scaling revenue",
-  ],
-  expansion: [
-    "expanding team",
-    "scaling",
-  ],
-  team_growth: [
-    "growing team",
-    "hiring fast",
-  ],
+const PAIN_SIGNALS = [
+  "outbound not working",
+  "cold email not getting replies",
+  "lead generation is hard",
+  "struggling with sales",
+  "prospecting takes too long",
+  "email outreach not converting",
+  "pipeline empty",
+  "need b2b leads",
+  "manual prospecting is exhausting",
+  "not getting responses",
+  "outbound is dead",
+  "cold calling doesn't work",
+  "sales pipeline dry",
+  "need more leads",
+  "how to get customers",
+]
+
+const HIRING_SIGNALS = [
+  "first sales hire",
+  "building sales team",
+  "need help with outbound",
+  "looking for sales rep",
+  "hiring b2b sales",
+  "need experienced closer",
+  "hiring account executive",
+  "hiring sales closer",
+  "need sales representative",
+  "seeking sales help",
+  "building outbound team",
+]
+
+const INTENT_SIGNALS = [
+  "how to get first b2b customers",
+  "manual prospecting takes too long",
+  "looking for alternatives",
+  "best tool for outbound",
+  "sales automation tool",
+  "cold email software",
+  "lead generation software",
+]
+
+function extractKeywords(text: string | null | undefined): string[] {
+  if (!text) return []
+  
+  const stopWords = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were',
+    'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+    'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as',
+    'into', 'through', 'during', 'before', 'after', 'above', 'below',
+    'between', 'under', 'again', 'further', 'then', 'once', 'here',
+    'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few',
+    'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+    'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'just',
+    'we', 'our', 'you', 'your', 'he', 'she', 'it', 'they', 'them',
+    'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+    'i', 'me', 'my', 'myself', 'us', 'ours', 'him', 'his', 'her',
+    'its', 'they', 'them', 'their', 'mine', 'yours', 'hers', 'ours',
+  ])
+  
+  const words = text.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.has(w))
+  
+  return [...new Set(words)].slice(0, 10)
 }
 
-const SITE_FILTERS = [
-  "site:linkedin.com",
-  "site:twitter.com",
-  "site:reddit.com",
-  "site:news",
-]
-
-const HIGH_INTENT_PHRASES = [
-  "looking for",
-  "need help with",
-  "alternatives to",
-  "hiring",
-  "using",
-  "problem with",
-  "best tool for",
-  "recommend",
-  "vs ",
-  "frustrated with",
-  "tired of",
-]
-
-const RECENCY_MODIFIERS = ["2026", "recent", "latest", "this year"]
-
-const ROLE_ALTERNATIVES: Record<string, string[]> = {
-  "sales representative": ["sales rep", "account executive", "sales executive", "business development rep"],
-  marketing: ["growth marketer", "performance marketer", "demand generation", "marketing manager"],
-  founder: ["founder", "ceo", "co-founder", "cto"],
+function generateVariations(
+  base: string,
+  product: string,
+  audience: string | null
+): string[] {
+  const variations: string[] = [base]
+  
+  if (product && base.toLowerCase().includes(product.toLowerCase()) === false) {
+    variations.push(`${product} ${base}`)
+    variations.push(`${base} ${product}`)
+  }
+  
+  if (audience) {
+    variations.push(`${audience} ${base}`)
+  }
+  
+  variations.push(`${base} for startup`)
+  variations.push(`${base} for b2b`)
+  
+  return [...new Set(variations)].slice(0, 5)
 }
 
-const PAIN_POINT_TEMPLATES = [
-  "lead generation",
-  "outbound sales",
-  "cold calling",
-  "email outreach",
-  "prospecting",
-  "conversion rates",
-  "winning deals",
-  "pipeline",
-  "closing deals",
-]
+function generatePainQueries(
+  product: string,
+  positioning: string | null,
+  coreOffer: string | null,
+  audience: string | null
+): string[] {
+  const queries: string[] = []
+  
+  const keywords = [
+    ...extractKeywords(product),
+    ...extractKeywords(positioning),
+    ...extractKeywords(coreOffer),
+    ...extractKeywords(audience),
+  ]
+  
+  for (const signal of PAIN_SIGNALS.slice(0, 5)) {
+    queries.push(signal)
+    
+    for (const keyword of keywords.slice(0, 3)) {
+      queries.push(`${signal} ${keyword}`)
+      queries.push(`${keyword} ${signal}`)
+    }
+  }
+  
+  return [...new Set(queries)].slice(0, 10)
+}
 
-const TECH_KEYWORDS = [
-  "salesforce",
-  "hubspot",
-  "mailchimp",
-  "zoom",
-  "slack",
-  "intercom",
-  "drift",
-  "clearbit",
-  "apollo",
-  "hunter",
-]
+function generateHiringQueries(
+  product: string,
+  positioning: string | null,
+  coreOffer: string | null,
+  audience: string | null
+): string[] {
+  const queries: string[] = []
+  
+  const keywords = [
+    ...extractKeywords(product),
+    ...extractKeywords(positioning),
+    ...extractKeywords(coreOffer),
+  ]
+  
+  for (const signal of HIRING_SIGNALS.slice(0, 5)) {
+    queries.push(signal)
+    
+    if (keywords.length > 0) {
+      for (const keyword of keywords.slice(0, 2)) {
+        queries.push(`${signal} ${keyword}`)
+      }
+    }
+  }
+  
+  return [...new Set(queries)].slice(0, 8)
+}
+
+function generateIntentQueries(
+  product: string,
+  positioning: string | null,
+  coreOffer: string | null,
+  audience: string | null
+): string[] {
+  const queries: string[] = []
+  
+  const keywords = [
+    ...extractKeywords(product),
+    ...extractKeywords(coreOffer),
+  ]
+  
+  for (const signal of INTENT_SIGNALS.slice(0, 5)) {
+    queries.push(signal)
+    
+    for (const keyword of keywords.slice(0, 2)) {
+      queries.push(`${signal} ${keyword}`)
+    }
+  }
+  
+  return [...new Set(queries)].slice(0, 8)
+}
+
+function generateGenericQueries(signal: string): string[] {
+  switch (signal) {
+    case "funding":
+    case "funding_announcement":
+      return ["raised seed round", "series funding", "announced funding", "Series A startup"]
+    case "launch":
+    case "product_launch":
+      return ["launched new product", "public beta", "announcing launch", "new startup launch"]
+    case "growth_activity":
+      return ["scaling revenue", "growing b2b", "building sales engine", "hired sales team"]
+    case "tech_usage":
+      return ["best CRM for startup", "sales tool recommendations", "outbound platform", "sales software"]
+    case "advertising":
+      return ["google ads help", "marketing agency", "paid acquisition", "b2b advertising"]
+    case "partnership":
+      return ["seeking partners", "looking for partnerships", "strategic partnerships"]
+    case "expansion":
+      return ["expanding team", "scaling sales", "growing b2b", "market expansion"]
+    case "automation_need":
+      return ["outbound automation", "sales outreach tool", "cold email software", "lead generation software"]
+    default:
+      return [signal]
+  }
+}
 
 export interface QueryGeneratorConfig {
   product: string
@@ -164,89 +208,42 @@ export function generateQueries(
   brand: QueryGeneratorConfig,
   useSiteFilters: boolean = false,
 ): string[] {
-  const templates = SIGNAL_QUERY_TEMPLATES[signal]
-  if (!templates || templates.length === 0) {
-    return []
+  const { product, positioning, coreOffer, audience } = brand
+  
+  if (!product) {
+    return generateGenericQueries(signal).slice(0, 5)
   }
 
-  const queries: string[] = []
+  let queries: string[] = []
 
-  for (const template of templates.slice(0, 3)) {
-    // Simple substitution - no complex placeholders
-    let query = template
-      .replace("{role}", "sales rep")
-      .replace("{audience}", brand.audience || "B2B")
-      .replace("{product}", brand.product || "software")
-      .replace("{pain_point}", "pipeline")
-      .replace("{tech}", "HubSpot")
-      .replace("{round}", "A")
+  switch (signal) {
+    case "pain":
+    case "outbound_pain":
+      queries = generatePainQueries(product, positioning, coreOffer, audience)
+      break
     
-    query = query.replace(/\s+/g, " ").trim()
-    if (query.length > 3) {
-      queries.push(query)
-    }
+    case "hiring":
+    case "hiring_sales":
+    case "hiring_engineer":
+    case "remote_hiring":
+    case "hiring_agency":
+      queries = generateHiringQueries(product, positioning, coreOffer, audience)
+      break
+    
+    case "intent":
+    case "founder_intent":
+      queries = generateIntentQueries(product, positioning, coreOffer, audience)
+      break
+    
+    default:
+      queries = generateGenericQueries(signal)
   }
 
-  return queries.slice(0, 5)
-}
+  const final = queries
+    .filter(q => q.length > 3 && q.length < 80)
+    .slice(0, 10)
 
-function substituteTemplate(
-  template: string,
-  vars: Record<string, string | undefined | null>,
-): string {
-  let result = template
-
-  for (const [key, value] of Object.entries(vars)) {
-    if (!value) continue
-
-    const placeholders = [
-      `{${key}}`,
-      `{${key}_variant}`,
-    ]
-
-    for (const placeholder of placeholders) {
-      if (result.includes(placeholder)) {
-        result = result.replace(placeholder, value)
-      }
-    }
-  }
-
-  if (result.includes("{pain_point}")) {
-    const pain = PAIN_POINT_TEMPLATES[Math.floor(Math.random() * PAIN_POINT_TEMPLATES.length)]
-    result = result.replace("{pain_point}", pain)
-  }
-
-  if (result.includes("{tech}")) {
-    const tech = TECH_KEYWORDS[Math.floor(Math.random() * TECH_KEYWORDS.length)]
-    result = result.replace("{tech}", tech)
-  }
-
-  if (result.includes("{round}")) {
-    const rounds = ["A", "B", "C"]
-    const round = rounds[Math.floor(Math.random() * rounds.length)]
-    result = result.replace("{round}", round)
-  }
-
-  result = result.replace(/\{[a-z_]+\}/g, "")
-
-  result = result.replace(/\s+/g, " ").trim()
-
-  const trimmed = result.replace(/^[,. ]+|[,. ]+$/g, "")
-  return trimmed
-}
-
-function selectRoleVariant(positioning?: string | null): string {
-  if (!positioning) return "sales representative"
-
-  const lower = positioning.toLowerCase()
-
-  for (const [role, variants] of Object.entries(ROLE_ALTERNATIVES)) {
-    if (lower.includes(role)) {
-      return variants[Math.floor(Math.random() * variants.length)]
-    }
-  }
-
-  return "sales representative"
+  return final
 }
 
 export function generateSignalQueriesForBrand(

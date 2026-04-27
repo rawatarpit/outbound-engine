@@ -17,12 +17,21 @@ export const indieHackersSchema = z.object({
     .min(1)
     .optional(),
 
+  keywords: z
+    .array(z.string())
+    .optional()
+    .default([]),
+
+  searchType: z
+    .enum(["posts", "questions", "products", "all"])
+    .default("posts"),
+
   limit: z
     .number()
     .int()
     .min(1)
     .max(IH_MAX_LIMIT)
-    .default(50)
+    .default(50),
 })
 
 export type IndieHackersConfig =

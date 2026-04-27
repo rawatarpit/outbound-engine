@@ -12,16 +12,20 @@ export const PH_MAX_GLOBAL_ITEMS = 500
 ========================================================= */
 
 export const productHuntSchema = z.object({
+  query: z
+    .string()
+    .min(1)
+    .optional(),
   auth: z.object({
-    client_id: z.string().min(5),
-    client_secret: z.string().min(5)
-  }),
+    client_id: z.string().min(5).optional(),
+    client_secret: z.string().min(5).optional()
+  }).optional(),
   limit: z
     .number()
     .int()
     .min(1)
     .max(PH_MAX_LIMIT)
-    .default(20)
+    .default(20),
 })
 
 export type ProductHuntConfig =
