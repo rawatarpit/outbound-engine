@@ -10,6 +10,9 @@ import { ForumAdapter } from "./adapters/forum"
 import { SocialAdapter } from "./adapters/social"
 import { ExtraAdapter } from "./adapters/extra"
 import { LeadAdapter } from "./adapters/leads"
+import { SearxngAdapter } from "./adapters/searxng"
+import { Crawl4AIAdapter } from "./adapters/crawl4ai"
+import { BrowserlessAdapter } from "./adapters/browserless"
 
 const logger = pino({ level: "debug" })
 
@@ -20,12 +23,17 @@ interface BrandCredentials {
   discoveryApiKey?: string
   scraperApiKey?: string
   apifyApiKey?: string
+  selfHostedConfig?: {
+    searxngUrl?: string
+    crawl4aiUrl?: string
+    browserlessUrl?: string
+  }
 }
 
 async function getBrandCredentials(brandId: string): Promise<BrandCredentials> {
   const { data: brand } = await supabase
     .from("brand_profiles")
-    .select("discovery_api_key, scraper_api_key, apify_api_key")
+    .select("discovery_api_key, scraper_api_key, apify_api_key, self_hosted_config")
     .eq("id", brandId)
     .single()
 
@@ -37,6 +45,7 @@ async function getBrandCredentials(brandId: string): Promise<BrandCredentials> {
     discoveryApiKey: brand.discovery_api_key || undefined,
     scraperApiKey: brand.scraper_api_key || undefined,
     apifyApiKey: brand.apify_api_key || undefined,
+    selfHostedConfig: brand.self_hosted_config || undefined,
   }
 }
 
@@ -46,37 +55,56 @@ function createAdaptersForBrand(
 ): Map<string, DiscoveryAdapter> {
   const adapters: DiscoveryAdapter[] = []
 
-  // CrawleeAdapter - key-free, uses local Playwright with stealth
+  const selfHosted = credentials.selfHostedConfig || {}
+
+  if (selfHosted.searxngUrl || process.env.SEARXNG_URL) {
+    adapters.push(
+      new SearxngAdapter({
+        searxngUrl: selfHosted.searxngUrl || process.env.SEARXNG_URL,
+      })
+    )
+  }
+
+  if (selfHosted.crawl4aiUrl || process.env.CRAWL4AI_URL) {
+    adapters.push(
+      new Crawl4AIAdapter({
+        crawl4aiUrl: selfHosted.crawl4aiUrl || process.env.CRAWL4AI_URL,
+      })
+    )
+  }
+
+  if (selfHosted.browserlessUrl || process.env.BROWSERLESS_URL) {
+    adapters.push(
+      new BrowserlessAdapter({
+        browserlessUrl: selfHosted.browserlessUrl || process.env.BROWSERLESS_URL,
+      })
+    )
+  }
+
+  if (credentials.scraperApiKey || selfHosted.searxngUrl || process.env.SEARXNG_URL) {
+    adapters.push(
+      new SearchAdapter(
+        {
+          scraperApiKey: credentials.scraperApiKey,
+        },
+        brandId,
+      )
+    )
+  }
+
   adapters.push(new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }))
-
-  // SearchAdapter - fallback if Crawlee fails
-  adapters.push(
-    new SearchAdapter(
-      { 
-        zenserpApiKey: credentials.discoveryApiKey,
-        scraperApiKey: credentials.scraperApiKey,
-        apifyApiKey: credentials.apifyApiKey,
-      },
-      brandId,
-    ),
-  )
-
-  // ForumAdapter - community forums & review sites
   adapters.push(new ForumAdapter({}))
-
-  // SocialAdapter - Twitter/Mastodon/Lemmy alternatives
   adapters.push(new SocialAdapter({}))
-
-  // ExtraAdapter - additional startup databases
   adapters.push(new ExtraAdapter({}))
-
-  // LeadAdapter - for finding potential clients (Reddit, events, podcasts)
   adapters.push(new LeadAdapter({}))
 
   return createAdapterRegistry(adapters)
 }
 
 const defaultAdapters = createAdapterRegistry([
+  new SearxngAdapter({}),
+  new Crawl4AIAdapter({}),
+  new BrowserlessAdapter({}),
   new CrawleeAdapter({ stealth: true, maxConcurrency: 2 }),
   new SearchAdapter({}),
   new ForumAdapter({}),

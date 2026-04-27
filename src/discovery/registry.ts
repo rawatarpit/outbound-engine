@@ -15,7 +15,7 @@ export type DiscoveryRisk = "low_api" | "medium_api" | "high_scrape" | "static";
 export type CostCategory = "low" | "medium" | "high";
 
 /* =========================================================
-   EXECUTION CONTRACT
+    EXECUTION CONTRACT
 ========================================================= */
 
 export interface ExecutorParams<TConfig = unknown> {
@@ -28,6 +28,14 @@ export type Executor<TConfig = unknown> = (
   params: ExecutorParams<TConfig>,
 ) => Promise<DiscoveryResult>;
 
+export type BatchExecutor<TConfig = unknown> = (
+  params: ExecutorParams<TConfig>,
+  onBatch: (batch: DiscoveryResult) => Promise<void>,
+  batchSize?: number,
+) => Promise<void>;
+
+export type AnyExecutor<TConfig = unknown> = Executor<TConfig> | BatchExecutor<TConfig>;
+
 /* =========================================================
    REGISTERED EXECUTOR DEFINITION
 ========================================================= */
@@ -39,7 +47,7 @@ export interface RegisteredExecutor<TConfig = unknown> {
   requiresAuth: boolean;
   requiresInputAgent?: boolean;
   schema: z.ZodSchema<TConfig>;
-  execute: Executor<TConfig>;
+  execute: AnyExecutor<TConfig>;
 }
 
 /* =========================================================
@@ -137,6 +145,12 @@ import { csvSchema } from "./executors/csv/schema";
 import { urlScraperExecutor } from "./executors/urlScraper/executor";
 import { urlScraperSchema } from "./executors/urlScraper/schema";
 
+import { emailFinderExecutor } from "./executors/emailFinder/executor";
+import { emailFinderSchema } from "./executors/emailFinder/schema";
+
+import { jobSpyExecutor } from "./executors/jobspy/executor";
+import { jobSpySchema } from "./executors/jobspy/schema";
+
 /* ---- REDDIT (MISSING BEFORE) ---- */
 
 import { redditExecutor } from "./executors/reddit/executor";
@@ -224,4 +238,26 @@ registerExecutor({
   requiresAuth: false,
   schema: urlScraperSchema,
   execute: urlScraperExecutor,
+});
+
+/* -------- FREE EMAIL FINDER -------- */
+
+registerExecutor({
+  type: "email_finder",
+  risk: "low_api",
+  cost: "low",
+  requiresAuth: false,
+  schema: emailFinderSchema,
+  execute: emailFinderExecutor,
+});
+
+/* -------- JOBSPY (LinkedIn/Indeed/Glassdoor) -------- */
+
+registerExecutor({
+  type: "jobspy",
+  risk: "high_scrape",
+  cost: "low",
+  requiresAuth: false,
+  schema: jobSpySchema,
+  execute: jobSpyExecutor,
 });

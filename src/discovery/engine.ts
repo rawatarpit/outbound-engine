@@ -5,15 +5,12 @@ import {
   releaseDiscoverySource
 } from "../db/supabase"
 
-import { getExecutor } from "./registry"
-import { normalizeDomain, normalizeEmail } from "./normalizer"
+import { getExecutor, type Executor, type ExecutorParams, type BatchExecutor } from "./registry"
 import { withTimeout, TimeoutError } from "./utils/timeout"
 import { DiscoveryError } from "./errors"
 import {
   deduplicateCompanies,
   deduplicateContacts,
-  transformGithubReposToCompanies,
-  isValidDomain,
   type DeduplicatedCompany,
   type DeduplicatedContact
 } from "./deduplicator"
@@ -29,14 +26,13 @@ const logger = pino({ level: "debug" })
 const EXECUTOR_TIMEOUT_MS = 120_000
 const MAX_RETRIES = 5
 const MAX_GLOBAL_ITEMS = 500
+const BATCH_SIZE = 10
 
 /* =========================================================
    BRAND VALIDATION
 ========================================================= */
 
-async function validateBrandForDiscovery(
-  brandId: string
-) {
+async function validateBrandForDiscovery(brandId: string) {
   const { data: brand, error } = await supabase
     .from("brand_profiles")
     .select("id, discovery_enabled")
@@ -55,32 +51,10 @@ async function validateBrandForDiscovery(
 }
 
 /* =========================================================
-   DISCOVERY COUNTER
-========================================================= */
-
-async function incrementDiscoveryCounter(
-  brandId: string
-) {
-  const { error } = await supabase.rpc(
-    "increment_discovery_counter",
-    { p_brand_id: brandId }
-  )
-
-  if (error) {
-    logger.error(
-      { brandId, error: error.message },
-      "Failed incrementing discovery counter"
-    )
-  }
-}
-
-/* =========================================================
    CIRCUIT BREAKER
 ========================================================= */
 
-async function triggerCircuitBreaker(
-  sourceId: string
-) {
+async function triggerCircuitBreaker(sourceId: string) {
   const { error } = await supabase
     .from("brand_discovery_sources")
     .update({
@@ -90,222 +64,207 @@ async function triggerCircuitBreaker(
     .eq("id", sourceId)
 
   if (error) {
-    logger.error(
-      { sourceId, error: error.message },
-      "Failed to disable discovery source via circuit breaker"
-    )
+    logger.error({ sourceId, error: error.message }, "Failed to disable discovery source via circuit breaker")
   } else {
-    logger.error(
-      { sourceId },
-      "Discovery source disabled via circuit breaker"
-    )
+    logger.error({ sourceId }, "Discovery source disabled via circuit breaker")
   }
+}
+
+/* =========================================================
+   DB OPERATIONS
+========================================================= */
+
+async function insertCompaniesBatch(
+  sourceId: string,
+  brandId: string,
+  companies: DiscoveryCompany[]
+): Promise<number> {
+  const companyRows = deduplicateCompanies(companies, sourceId, brandId)
+
+  if (companyRows.length === 0) return 0
+
+  const { error } = await supabase
+    .from("discovered_companies")
+    .upsert(companyRows, { onConflict: "brand_id,domain" })
+
+  if (error) {
+    logger.error({ sourceId, error: error.message, count: companyRows.length }, "Failed to insert companies batch")
+    throw new DiscoveryError(`Failed to insert companies: ${error.message}`, "fatal")
+  }
+
+  logger.info({ sourceId, count: companyRows.length }, "Inserted companies batch")
+  return companyRows.length
+}
+
+async function insertContactsBatch(
+  sourceId: string,
+  brandId: string,
+  contacts: DiscoveryContact[]
+): Promise<number> {
+  const { data: companyMapRows } = await supabase
+    .from("discovered_companies")
+    .select("id, domain")
+    .eq("brand_id", brandId)
+
+  const companyMap = new Map<string, string>()
+  for (const row of companyMapRows ?? []) {
+    companyMap.set(row.domain, row.id)
+  }
+
+  const contactRows = deduplicateContacts(contacts, sourceId, brandId, companyMap)
+
+  if (contactRows.length === 0) return 0
+
+  const { error } = await supabase
+    .from("discovered_contacts")
+    .upsert(contactRows, { onConflict: "brand_id,email" })
+
+  if (error) {
+    logger.error({ sourceId, error: error.message, count: contactRows.length }, "Failed to insert contacts batch")
+    throw new DiscoveryError(`Failed to insert contacts: ${error.message}`, "fatal")
+  }
+
+  logger.info({ sourceId, count: contactRows.length }, "Inserted contacts batch")
+  return contactRows.length
+}
+
+async function onBatchInsert(
+  sourceId: string,
+  brandId: string,
+  batch: DiscoveryResult
+): Promise<{ companies: number; contacts: number }> {
+  const companiesInserted = await insertCompaniesBatch(sourceId, brandId, batch.companies ?? [])
+  const contactsInserted = await insertContactsBatch(sourceId, brandId, batch.contacts ?? [])
+  return { companies: companiesInserted, contacts: contactsInserted }
+}
+
+/* =========================================================
+   STREAMING EXECUTE (BATCH INCREMENTAL INSERT)
+========================================================= */
+
+async function executeStreaming(
+  source: DiscoverySource,
+  validatedConfig: unknown,
+  registered: { execute: BatchExecutor<unknown> }
+): Promise<{ totalCompanies: number; totalContacts: number }> {
+  let totalCompanies = 0
+  let totalContacts = 0
+  let batchNumber = 0
+
+  const onBatch = async (batch: DiscoveryResult): Promise<void> => {
+    batchNumber++
+    const { companies, contacts } = await onBatchInsert(source.id, source.brand_id, batch)
+    totalCompanies += companies
+    totalContacts += contacts
+    console.log(`[STREAM] Batch ${batchNumber}: ${companies} companies, ${contacts} contacts inserted`)
+  }
+
+  await registered.execute(
+    { sourceId: source.id, brandId: source.brand_id, config: validatedConfig },
+    onBatch,
+    BATCH_SIZE
+  )
+
+  return { totalCompanies, totalContacts }
+}
+
+/* =========================================================
+   STANDARD EXECUTE (FALLBACK FOR LEGACY EXECUTORS)
+========================================================= */
+
+async function executeStandard(
+  source: DiscoverySource,
+  validatedConfig: unknown,
+  registered: { execute: Executor<unknown> }
+): Promise<{ totalCompanies: number; totalContacts: number }> {
+  const results: DiscoveryResult = await withTimeout(
+    registered.execute({
+      sourceId: source.id,
+      brandId: source.brand_id,
+      config: validatedConfig
+    }),
+    EXECUTOR_TIMEOUT_MS
+  )
+
+  if (!results) {
+    throw new DiscoveryError("Executor returned empty result", "retryable")
+  }
+
+  const safeCompanies = (results.companies ?? []).slice(0, MAX_GLOBAL_ITEMS)
+  const safeContacts = (results.contacts ?? []).slice(0, MAX_GLOBAL_ITEMS)
+
+  const companiesInserted = await insertCompaniesBatch(source.id, source.brand_id, safeCompanies)
+  const contactsInserted = await insertContactsBatch(source.id, source.brand_id, safeContacts)
+
+  return { totalCompanies: companiesInserted, totalContacts: contactsInserted }
 }
 
 /* =========================================================
    MAIN EXECUTION
 ========================================================= */
 
-export async function executeSource(
-  source: DiscoverySource
-): Promise<void> {
+export async function executeSource(source: DiscoverySource): Promise<void> {
   const start = Date.now()
 
-  logger.info(
-    {
-      sourceId: source.id,
-      type: source.type,
-      brandId: source.brand_id
-    },
-    "Discovery execution started"
-  )
+  logger.info({ sourceId: source.id, type: source.type, brandId: source.brand_id }, "Discovery execution started")
 
   let classification: "retryable" | "fatal" = "retryable"
+  let totalCompanies = 0
+  let totalContacts = 0
 
   try {
-    /* ------------------------------------------
-       1. BRAND GUARD
-    ------------------------------------------ */
-
     await validateBrandForDiscovery(source.brand_id)
-
-    /* ------------------------------------------
-       2. GET EXECUTOR
-    ------------------------------------------ */
 
     const registered = getExecutor(source.type)
 
     if (!registered) {
-      throw new DiscoveryError(
-        `No executor registered for type: ${source.type}`,
-        "fatal"
-      )
+      throw new DiscoveryError(`No executor registered for type: ${source.type}`, "fatal")
     }
-
-    /* ------------------------------------------
-       3. VALIDATE CONFIG
-    ------------------------------------------ */
 
     let validatedConfig
     try {
       validatedConfig = registered.schema.parse(source.config)
     } catch (parseError: any) {
-      logger.error(
-        { sourceId: source.id, type: source.type, rawConfig: source.config, parseError: parseError?.message },
-        "Config validation failed - source config format mismatch"
-      )
-      throw new DiscoveryError(
-        `Config validation failed: ${parseError?.message}`,
-        "fatal"
-      )
+      logger.error({ sourceId: source.id, type: source.type, rawConfig: source.config, parseError: parseError?.message }, "Config validation failed")
+      throw new DiscoveryError(`Config validation failed: ${parseError?.message}`, "fatal")
     }
 
-    /* ------------------------------------------
-       4. EXECUTE WITH TIMEOUT
-    ------------------------------------------ */
+    const executor = registered.execute as any
+    const isStreaming = (registered.execute as any).length >= 3
 
-    const results: DiscoveryResult =
-      await withTimeout(
-        registered.execute({
-          sourceId: source.id,
-          brandId: source.brand_id,
-          config: validatedConfig
-        }),
-        EXECUTOR_TIMEOUT_MS
-      )
-
-    if (!results) {
-      throw new DiscoveryError(
-        "Executor returned empty result",
-        "retryable"
-      )
+    if (isStreaming) {
+      console.log(`[STREAM] Using streaming executor for ${source.type}`)
+      const result = await executeStreaming(source, validatedConfig, { execute: executor })
+      totalCompanies = result.totalCompanies
+      totalContacts = result.totalContacts
+    } else {
+      console.log(`[STREAM] Using standard executor for ${source.type}`)
+      const result = await executeStandard(source, validatedConfig, { execute: executor })
+      totalCompanies = result.totalCompanies
+      totalContacts = result.totalContacts
     }
 
-    /* ------------------------------------------
-       5. HARD GLOBAL CAP
-    ------------------------------------------ */
-
-    const safeCompanies = (results.companies ?? [])
-      .slice(0, MAX_GLOBAL_ITEMS)
-
-    const safeContacts = (results.contacts ?? [])
-      .slice(0, MAX_GLOBAL_ITEMS)
-
-/* ------------------------------------------
-       6. PREPARE COMPANIES (PROPER DEDUP)
-     ------------------------------------------ */
-
-    const companyRows = deduplicateCompanies(
-      safeCompanies as DiscoveryCompany[],
-      source.id,
-      source.brand_id
-    )
-
-    if (companyRows.length > 0) {
-      console.log(`[DB] Upserting ${companyRows.length} unique companies to discovered_companies table...`)
-
-      const { data, error: companyError } = await supabase
-        .from("discovered_companies")
-        .upsert(companyRows, {
-          onConflict: "brand_id,domain"
-        })
-
-      if (companyError) {
-        console.error(`[DB ERROR] Failed to insert companies:`, companyError.message)
-        logger.error(
-          { sourceId: source.id, error: companyError.message, count: companyRows.length },
-          "Failed to insert discovered companies"
-        )
-        throw new DiscoveryError(
-          `Failed to insert companies: ${companyError.message}`,
-          "fatal"
-        )
-      } else {
-        console.log(`[DB] Successfully inserted ${companyRows.length} companies`)
-      }
+    const { error: counterError } = await supabase.rpc("increment_discovery_counter", { p_brand_id: source.brand_id })
+    if (counterError) {
+      logger.error({ brandId: source.brand_id, error: counterError.message }, "Failed incrementing discovery counter")
     }
-
-    /* ------------------------------------------
-       7. BUILD COMPANY MAP
-    ------------------------------------------ */
-
-    const { data: companyMapRows } =
-      await supabase
-        .from("discovered_companies")
-        .select("id, domain")
-        .eq("brand_id", source.brand_id)
-
-    const companyMap = new Map<string, string>()
-
-    for (const row of companyMapRows ?? []) {
-      companyMap.set(row.domain, row.id)
-    }
-
-/* ------------------------------------------
-       8. PREPARE CONTACTS (PROPER DEDUP)
-     ------------------------------------------ */
-
-    const contactRows = deduplicateContacts(
-      safeContacts as DiscoveryContact[],
-      source.id,
-      source.brand_id,
-      companyMap
-    )
-
-    if (contactRows.length > 0) {
-      const { error: contactError } = await supabase
-        .from("discovered_contacts")
-        .upsert(contactRows, {
-          onConflict: "brand_id,email"
-        })
-
-      if (contactError) {
-        logger.error(
-          { sourceId: source.id, error: contactError.message, count: contactRows.length },
-          "Failed to insert discovered contacts"
-        )
-        throw new DiscoveryError(
-          `Failed to insert contacts: ${contactError.message}`,
-          "fatal"
-        )
-      }
-    }
-
-    /* ------------------------------------------
-       9. COUNTER
-    ------------------------------------------ */
-
-    await incrementDiscoveryCounter(
-      source.brand_id
-    )
-
-    /* ------------------------------------------
-       10. RELEASE SUCCESS
-    ------------------------------------------ */
 
     await releaseDiscoverySource({
       source_id: source.id,
       success: true,
-      companies: companyRows.length,
-      contacts: contactRows.length,
+      companies: totalCompanies,
+      contacts: totalContacts,
       duration_ms: Date.now() - start
     })
 
-    logger.info(
-      {
-        sourceId: source.id,
-        durationMs: Date.now() - start,
-        companiesInserted: companyRows.length,
-        contactsInserted: contactRows.length,
-        meta: results.meta ?? null
-      },
-      "Discovery execution completed"
-    )
-  } catch (error: any) {
-    /* ------------------------------------------
-       ERROR CLASSIFICATION
-    ------------------------------------------ */
+    logger.info({
+      sourceId: source.id,
+      durationMs: Date.now() - start,
+      companiesInserted: totalCompanies,
+      contactsInserted: totalContacts,
+    }, "Discovery execution completed")
 
+  } catch (error: any) {
     if (error instanceof TimeoutError) {
       classification = "retryable"
     } else if (error instanceof DiscoveryError) {
@@ -314,23 +273,9 @@ export async function executeSource(
       classification = "retryable"
     }
 
-    logger.error(
-      {
-        sourceId: source.id,
-        error: error?.message,
-        classification
-      },
-      "Discovery execution failed"
-    )
+    logger.error({ sourceId: source.id, error: error?.message, classification }, "Discovery execution failed")
 
-    /* ------------------------------------------
-       CIRCUIT BREAKER
-    ------------------------------------------ */
-
-    if (
-      classification === "fatal" ||
-      (source.retry_count ?? 0) + 1 >= MAX_RETRIES
-    ) {
+    if (classification === "fatal" || (source.retry_count ?? 0) + 1 >= MAX_RETRIES) {
       await triggerCircuitBreaker(source.id)
     }
 
