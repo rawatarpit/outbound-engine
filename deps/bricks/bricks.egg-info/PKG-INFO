@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: bricks
+Version: 0.1.0
+Requires-Dist: requests
+Requires-Dist: dnspython
+Dynamic: requires-dist

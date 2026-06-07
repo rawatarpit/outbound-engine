@@ -1,0 +1,2 @@
+[console_scripts]
+bricks = bricks:main

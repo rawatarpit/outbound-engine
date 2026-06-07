@@ -1,0 +1,8 @@
+bricks.py
+setup.py
+bricks.egg-info/PKG-INFO
+bricks.egg-info/SOURCES.txt
+bricks.egg-info/dependency_links.txt
+bricks.egg-info/entry_points.txt
+bricks.egg-info/requires.txt
+bricks.egg-info/top_level.txt
