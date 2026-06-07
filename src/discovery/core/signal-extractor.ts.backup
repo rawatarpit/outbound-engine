@@ -1,0 +1,182 @@
+import pino from "pino"
+
+const logger = pino({ level: "debug" })
+
+export enum SignalType {
+  HIRING = "HIRING",
+  FUNDING = "FUNDING",
+  LAUNCH = "LAUNCH",
+  PAIN_POINT = "PAIN_POINT",
+  TOOL_SEARCH = "TOOL_SEARCH",
+  PARTNERSHIP = "PARTNERSHIP",
+  EXPANSION = "EXPANSION",
+  MIGRATION = "MIGRATION",
+  COMPLIANCE = "COMPLIANCE",
+  BURNOUT = "BURNOUT"
+}
+
+export interface Signal {
+  signal_type: SignalType
+  keywords: string[]
+  confidence_score: number
+  raw_text: string
+}
+
+const HIRING_KEYWORDS = [
+  "hiring", "we're hiring", "we are hiring", "join our team", "job opening",
+  "looking for", "recruiting", "position available", "now hiring", "apply now",
+  "sales manager", "account executive", "sales rep", "business development",
+  "marketing manager", "growth lead", "head of sales", "sales director",
+  "open roles", "career opportunity", "team growth", "expanding team",
+  "senior engineer", "backend developer", "frontend developer", "full stack",
+  "cto", "vp of", "chief", "director of", "lead engineer", "senior role",
+  "remote first", "hiring remotely", "we're growing", "growing team",
+  "sales team", "marketing hire", "technical hire", "new position",
+]
+
+const FUNDING_KEYWORDS = [
+  "raised", "funding", "seed round", "series a", "series b", "series c",
+  "investment", "valuation", "venture capital", "angel investor", "funding round",
+  "million", "billion", "investment round", "closed round", "securing",
+  "secured funding", "new investment", "capital raise", "pre-series",
+  "bridge round", "extension", "追加融资", "估值",
+]
+
+const LAUNCH_KEYWORDS = [
+  "launching", "launched", "just launched", "we're live", "we are live",
+  "product hunt", "new product", "release", "live on", "available now",
+  "introducing", "announcing", "built with", "built a", "created a",
+  "shipping", "shipped", "first version", "released", "debut",
+  "public launch", "coming soon", "now available", "general availability",
+]
+
+const PAIN_KEYWORDS = [
+  "struggling", "problem", "pain point", "frustrated", "difficult",
+  "challenge", "issue", "can't find", "looking for a solution",
+  "any recommendations", "alternatives to", "better than",
+  "switching from", "replacing", "need help", "stuck on", "not happy with",
+  "waste of time", "slow", "expensive", "too complicated", "overwhelming",
+  "not scaling", "breaking", "falls apart", "too manual", "tedious",
+  "missing features", "what's the best", "recommend me", "thoughts on",
+  "anyone tried", "has anyone used", "worth it", "regret", "disappointed",
+]
+
+const TOOL_SEARCH_KEYWORDS = [
+  "what tool", "best tool", "recommend", "suggestions for",
+  "looking for a tool", "which software", "what do you use for",
+  "tool for", "software for", "platform for", "service for",
+  "need a", "want a better", "tired of", "migrate to", "moving from",
+  "switch to", "替代", "工具", "方案",
+]
+
+const PARTNERSHIP_KEYWORDS = [
+  "partnership", "partner with", "looking for partners", "collaborate",
+  "integration partner", "strategic partner", "channel partner",
+  "reseller", "integration with", "co-marketing", "joint offering",
+  "white label", "referral partner", "partner program", "partners wanted",
+]
+
+const EXPANSION_KEYWORDS = [
+  "expanding", "expansion", "new market", "going global", "opening office",
+  "scaling", "new location", "international", "enter new market",
+  "moving to", "new city", "new region", "hiring in", "opening in",
+  "entering", "global expansion", "apac", "emea", "latam", "saas expansion",
+]
+
+const MIGRATION_KEYWORDS = [
+  "migrating from", "migrating to", "migration", "moving from", "switching to",
+  "replace our", "replacing", "moving away from", "leaving", "porting",
+  "upgrade from", "upgrading to", "legacy system", "modernizing", "replatform",
+  "cloud migration", "digital transformation", "moving to the cloud",
+]
+
+const COMPLIANCE_KEYWORDS = [
+  "compliance", "regulatory", "audit", "gdpr", "hipaa", "sox", "pci",
+  "data privacy", "security compliance", "regulatory requirement",
+  "compliance team", "compliance officer", "regulatory compliance",
+  "need to be compliant", "compliance tool", "compliance automation",
+]
+
+const BURNOUT_KEYWORDS = [
+  "burnout", "overworked", "understaffed", "too much work", "hiring freeze",
+  "can't keep up", "falling behind", "overwhelmed", "team is stretched",
+  "too few engineers", "lack of resources", "capacity issue",
+  "overloaded", "not enough developers", "staffing shortage", "talent gap",
+]
+
+const SIGNAL_PRIORITY: Record<SignalType, number> = {
+  [SignalType.HIRING]: 1.2,
+  [SignalType.PAIN_POINT]: 1.1,
+  [SignalType.TOOL_SEARCH]: 1.3,
+  [SignalType.FUNDING]: 1.0,
+  [SignalType.LAUNCH]: 0.9,
+  [SignalType.PARTNERSHIP]: 0.85,
+  [SignalType.EXPANSION]: 0.8,
+  [SignalType.MIGRATION]: 0.9,
+  [SignalType.COMPLIANCE]: 0.95,
+  [SignalType.BURNOUT]: 1.15,
+}
+
+export function extractSignal(text: string, title: string = ""): Signal {
+  const fullText = `${title} ${text}`.toLowerCase()
+
+  const signals: { type: SignalType; score: number; keywords: string[] }[] = []
+
+  signals.push(checkKeywords(fullText, SignalType.HIRING, HIRING_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.FUNDING, FUNDING_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.LAUNCH, LAUNCH_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.PAIN_POINT, PAIN_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.TOOL_SEARCH, TOOL_SEARCH_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.PARTNERSHIP, PARTNERSHIP_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.EXPANSION, EXPANSION_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.MIGRATION, MIGRATION_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.COMPLIANCE, COMPLIANCE_KEYWORDS))
+  signals.push(checkKeywords(fullText, SignalType.BURNOUT, BURNOUT_KEYWORDS))
+
+  signals.sort((a, b) => b.score - a.score)
+
+  const bestSignal = signals[0]
+
+  if (bestSignal.score === 0) {
+    return {
+      signal_type: SignalType.PAIN_POINT,
+      keywords: [],
+      confidence_score: 0.2,
+      raw_text: text
+    }
+  }
+
+  const priorityBonus = SIGNAL_PRIORITY[bestSignal.type] || 1.0
+  const confidence = Math.min((bestSignal.score / 3) * priorityBonus, 1.0)
+
+  return {
+    signal_type: bestSignal.type,
+    keywords: bestSignal.keywords,
+    confidence_score: confidence,
+    raw_text: text
+  }
+}
+
+function checkKeywords(
+  text: string,
+  type: SignalType,
+  keywords: string[]
+): { type: SignalType; score: number; keywords: string[] } {
+  const found: string[] = []
+  let score = 0
+
+  for (const keyword of keywords) {
+    if (text.includes(keyword.toLowerCase())) {
+      found.push(keyword)
+      score += 1
+    }
+  }
+
+  return { type, score, keywords: found }
+}
+
+export function batchExtractSignals(
+  items: { title?: string; text: string }[]
+): Signal[] {
+  return items.map(item => extractSignal(item.text, item.title || ""))
+}
