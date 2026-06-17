@@ -4,3 +4,28 @@ data/
 .env
 *.pyc
 __pycache__/
+
+# Secrets and credentials
+*.key
+*.pem
+*.cert
+*.cred
+*.credential
+.env.local
+.env.production
+.env.development
+.env.staging
+config.json
+secrets.*
+credentials.*
+**/service-account*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
