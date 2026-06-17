@@ -114,7 +114,7 @@ fit_score (0-100), fit_reasoning, summary
       buying_signals: (parsed.buying_signals as string[]).join("; "),
       automation_maturity: parsed.business_model,
       summary: parsed.summary,
-      raw_content: content,
+      raw_content: null,
     });
 
     if (error?.code === "23505") {

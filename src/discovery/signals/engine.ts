@@ -600,7 +600,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Aggregator name match",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -610,7 +610,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Aggregator domain match",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -620,7 +620,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Job board / recruiter domain",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -630,7 +630,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Enterprise domain",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -640,7 +640,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Media/publisher domain",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -650,7 +650,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: "Not a likely real company name",
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -663,7 +663,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: `Pre-validation: ${preValidation.rejectionReasons.join("; ")}`,
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, query: query.text, intent_id: query.intent_id, preValidation },
+                raw_payload: null,
               })
               if (signal.intent === 'provider') {
                 recordProviderSignal(query.source)
@@ -683,7 +683,7 @@ export async function startSignalDiscovery(
                 domain: `rejected-${rejectIdx()}.result`, website: company.source_url || null,
                 source_name: query.source, signal_type: query.signal,
                 enrichment_status: "rejected", error: `Keyword relevance too low: ${keywordScore.relevance_score}`,
-                raw_payload: { title: company.title, url: company.source_url, summary: company.summary, keyword_score: keywordScore, query: query.text, intent_id: query.intent_id },
+                raw_payload: null,
               })
               continue
             }
@@ -970,7 +970,7 @@ export async function startSignalDiscovery(
               domain: `rejected-${phase2Rejected.length + 1}.result`, website: sourceUrl || null,
               source_name: query.source, signal_type: query.signal,
               enrichment_status: "rejected", error: `LLM fit rejection: ${llmScore.fit_reason}`,
-              raw_payload: { title: companyName, url: sourceUrl, summary: description, query: query.text, intent_id: query.intent_id, llmScore },
+              raw_payload: null,
             })
             continue
           }

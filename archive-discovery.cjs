@@ -1,8 +1,12 @@
 const { createClient } = require("@supabase/supabase-js")
 const { execSync } = require("child_process")
 
-const SUPABASE_URL = "https://xtobbvffaxoiadserkbb.supabase.co"
-const SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0b2JidmZmYXhvaWFkc2Vya2JiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTMxNTM0NiwiZXhwIjoyMDg2ODkxMzQ2fQ.pmICiWDximLsYHXOhFO7W0oVbGY4f8a7IBeMaid3kZs"
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://xtobbvffaxoiadserkbb.supabase.co"
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+if (!SERVICE_KEY) {
+  console.error("Fatal: SUPABASE_SERVICE_ROLE_KEY environment variable is required")
+  process.exit(1)
+}
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 function pg(sql) {
@@ -23,7 +27,7 @@ async function archiveQueryLogs() {
     .from("discovery_query_log")
     .select("*")
     .lt("generated_at", cutoff)
-    .limit(5000)
+    .limit(50000)
 
   if (error) { console.warn("query_log fetch error:", error.message); return }
   if (!data || data.length === 0) { console.log("No old query logs"); return }
@@ -51,7 +55,7 @@ async function archiveRawPayloads() {
     .from("discovered_companies")
     .select("id, name, domain, brand_id, raw_payload")
     .eq("processed", true)
-    .limit(5000)
+    .limit(50000)
 
   if (error) { console.warn("payload fetch error:", error.message); return }
   if (!data || data.length === 0) { console.log("No processed companies"); return }
@@ -83,7 +87,7 @@ async function archiveResearchContent() {
     .select("id, company_id, brand_id, raw_content")
     .lt("created_at", cutoff)
     .not("raw_content", "is", null)
-    .limit(5000)
+    .limit(50000)
 
   if (error) { console.warn("research fetch error:", error.message); return }
   if (!data || data.length === 0) { console.log("No old research content"); return }
@@ -108,6 +112,30 @@ async function archiveResearchContent() {
   else console.log(`Archived ${inserted} research contents`)
 }
 
+async function cleanupOldRejected() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const { data, error } = await supabase
+    .from("discovered_companies")
+    .select("id")
+    .eq("processed", false)
+    .neq("enrichment_status", "raw")
+    .lt("discovered_at", cutoff)
+    .limit(50000)
+
+  if (error) { console.warn("rejected fetch error:", error.message); return }
+  if (!data || data.length === 0) { console.log("No old rejected companies"); return }
+
+  const { error: delError } = await supabase
+    .from("discovered_companies")
+    .delete()
+    .eq("processed", false)
+    .neq("enrichment_status", "raw")
+    .lt("discovered_at", cutoff)
+
+  if (delError) console.warn("rejected delete error:", delError.message)
+  else console.log(`Deleted ${data.length} old rejected/abandoned companies`)
+}
+
 async function main() {
   const start = Date.now()
   console.log("=== Daily archival run ===", new Date().toISOString())
@@ -116,6 +144,7 @@ async function main() {
     await archiveQueryLogs()
     await archiveRawPayloads()
     await archiveResearchContent()
+    await cleanupOldRejected()
   } catch (err) {
     console.error("Archive failed:", err.message)
   }

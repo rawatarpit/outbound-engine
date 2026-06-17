@@ -137,7 +137,7 @@ export async function runResearchAgent(
       automation_maturity: parsed.automation_maturity,
       sponsorship_potential: parsed.sponsorship_potential,
       summary: parsed.summary,
-      raw_content: content,
+      raw_content: null,
     });
 
     if (error?.code === "23505") {
