@@ -53,7 +53,7 @@ export async function runQualificationAgent(
 
     const { data: research } = await supabase
       .from("research")
-      .select("*")
+      .select("industry, pain_points, buying_signals, automation_maturity")
       .eq("company_id", company.id)
       .order("created_at", { ascending: false })
       .maybeSingle();

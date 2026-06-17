@@ -43,7 +43,7 @@ export async function runReplyAnalysis(
   try {
     const { data: company } = await supabase
       .from("companies")
-      .select("*")
+      .select("id, name, brand_id, status")
       .eq("id", companyId)
       .maybeSingle();
 

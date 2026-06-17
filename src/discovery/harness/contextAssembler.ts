@@ -1,6 +1,7 @@
 import pino from "pino"
 import { supabase, type BrandProfile, type BrandIntent } from "../../db/supabase"
 import { embed } from "../rag/embedder"
+import { queryCache } from "../utils/query-cache"
 
 const logger = pino({ level: "info" })
 
@@ -80,12 +81,15 @@ async function buildCompaction(input: ContextInput): Promise<string> {
   const blocks: string[] = []
 
   if (stage === "qualification" || stage === "outreach" || stage === "reply" || stage === "negotiation") {
-    const { data: research } = await supabase
-      .from("research")
-      .select("*")
-      .eq("company_id", company.id)
-      .order("created_at", { ascending: false })
-      .maybeSingle()
+    const research = await queryCache.getOrFetch("research", async () => {
+      const { data } = await supabase
+        .from("research")
+        .select("id, industry, size_estimate, pain_points, buying_signals, automation_maturity, summary")
+        .eq("company_id", company.id)
+        .order("created_at", { ascending: false })
+        .maybeSingle()
+      return data
+    }, "research", company.id)
 
     if (research) {
       blocks.push(`=== RESEARCH SUMMARY ===
@@ -99,12 +103,15 @@ Summary: ${research.summary}`)
   }
 
   if (stage === "outreach" || stage === "reply" || stage === "negotiation") {
-    const { data: qualification } = await supabase
-      .from("qualification")
-      .select("*")
-      .eq("company_id", company.id)
-      .order("created_at", { ascending: false })
-      .maybeSingle()
+    const qualification = await queryCache.getOrFetch("qualification", async () => {
+      const { data } = await supabase
+        .from("qualification")
+        .select("id, fit_score, reasoning, confidence")
+        .eq("company_id", company.id)
+        .order("created_at", { ascending: false })
+        .maybeSingle()
+      return data
+    }, "qualification", company.id)
 
     if (qualification) {
       blocks.push(`=== QUALIFICATION ASSESSMENT ===
@@ -198,12 +205,15 @@ async function findRelevantIntents(input: ContextInput) {
 
 async function findPastOutcomes(input: ContextInput) {
   try {
-    const { data } = await supabase
-      .from("companies")
-      .select("status, relevance_score")
-      .eq("brand_id", input.brand.id)
-      .in("status", ["closed_won", "rejected", "closed_lost"])
-      .limit(100)
+    const data = await queryCache.getOrFetch("pastOutcomes", async () => {
+      const { data } = await supabase
+        .from("companies")
+        .select("status, relevance_score")
+        .eq("brand_id", input.brand.id)
+        .in("status", ["closed_won", "rejected", "closed_lost"])
+        .limit(100)
+      return data ?? []
+    }, "pastOutcomes", input.brand.id)
 
     if (!data || !data.length) return []
 
@@ -227,11 +237,14 @@ async function findPastOutcomes(input: ContextInput) {
 
 async function findSourcePerformance(input: ContextInput) {
   try {
-    const { data } = await supabase
-      .from("signal_source_performance")
-      .select("*")
-      .eq("brand_id", input.brand.id)
-      .limit(20)
+    const data = await queryCache.getOrFetch("sourcePerformance", async () => {
+      const { data } = await supabase
+        .from("signal_source_performance")
+        .select("source_id, source_name, sends, replies, bounces")
+        .eq("brand_id", input.brand.id)
+        .limit(20)
+      return data ?? []
+    }, "sourcePerformance", input.brand.id)
 
     if (!data) return []
 

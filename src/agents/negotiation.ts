@@ -32,7 +32,7 @@ export async function runNegotiationAgent(
 
     const { data: company } = await supabase
       .from("companies")
-      .select("*")
+      .select("id, name, brand_id, status")
       .eq("id", companyId)
       .maybeSingle();
 
@@ -68,7 +68,7 @@ export async function runNegotiationAgent(
 
     const { data: reply } = await supabase
       .from("replies")
-      .select("*")
+      .select("raw_content, raw_message, intent, sentiment, confidence")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .maybeSingle();

@@ -90,7 +90,7 @@ export async function runOutreachAgent(
 
     const { data: research } = await supabase
       .from("research")
-      .select("*")
+      .select("pain_points")
       .eq("company_id", company.id)
       .order("created_at", { ascending: false })
       .maybeSingle();

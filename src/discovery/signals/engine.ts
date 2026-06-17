@@ -39,21 +39,65 @@ import { createRunId, logAgentTurn } from "../../harness/observability"
 import { withRetry } from "../../harness/errorHandling"
 import { getAdapterTool, getAdapterToolsBySource } from "../../harness/adapterTools"
 
+// ---- Buffered query log writer ----
+interface QueryLogEntry {
+  brand_id: string
+  intent_id: string
+  intent_text: string
+  adapter: string
+  query: string
+  raw_count: number
+  approved_count: number
+  lead_count: number
+  run_id: string
+}
+
+const queryLogBuffer: QueryLogEntry[] = []
+let queryLogFlushTimer: ReturnType<typeof setTimeout> | null = null
+const QUERY_LOG_FLUSH_INTERVAL = 30_000
+const QUERY_LOG_FLUSH_THRESHOLD = 20
+
+function bufferQueryLogEntry(entry: QueryLogEntry): void {
+  queryLogBuffer.push(entry)
+  if (queryLogBuffer.length >= QUERY_LOG_FLUSH_THRESHOLD) {
+    flushQueryLogBuffer()
+  } else if (!queryLogFlushTimer) {
+    queryLogFlushTimer = setTimeout(flushQueryLogBuffer, QUERY_LOG_FLUSH_INTERVAL)
+  }
+}
+
+async function flushQueryLogBuffer(): Promise<void> {
+  if (queryLogFlushTimer) {
+    clearTimeout(queryLogFlushTimer)
+    queryLogFlushTimer = null
+  }
+  if (queryLogBuffer.length === 0) return
+  const batch = queryLogBuffer.splice(0, queryLogBuffer.length)
+  try {
+    const { supabase } = await import("../../db/supabase")
+    await supabase.from("discovery_query_log").insert(batch)
+    logger.info({ count: batch.length }, "Flushed query log buffer")
+  } catch (err: any) {
+    logger.warn({ error: err.message, count: batch.length }, "Failed to flush query log buffer")
+    queryLogBuffer.push(...batch)
+  }
+}
+
 const logger = pino({ level: "info" })
 
 const SIGNAL_ADAPTER_MAP: Record<string, string[]> = {
-  hiring: ["hn_hiring", "indeed", "wellfound", "jobs", "search", "web_research", "reddit"],
-  pain: ["reddit", "hackernews", "search", "web_research", "community", "pushshift"],
-  funding: ["techcrunch", "crunchbase", "news", "search", "web_research"],
-  automation_need: ["reddit", "hackernews", "search", "web_research", "pushshift", "community"],
-  tech_usage: ["stackshare", "github", "search", "web_research"],
-  growth_activity: ["yc", "producthunt", "news", "search", "web_research"],
-  partnership: ["search", "news", "blogs"],
-  outbound_pain: ["reddit", "hackernews", "community", "search"],
-  expansion: ["news", "search", "techcrunch", "web_research"],
-  migration: ["search", "reddit", "hackernews", "stackshare"],
-  compliance: ["news", "search", "blogs"],
-  burnout: ["reddit", "hackernews", "community", "jobs"],
+  hiring: ["hn_hiring", "indeed", "wellfound", "jobs", "search", "web_research", "reddit", "meta_ads"],
+  pain: ["reddit", "hackernews", "search", "web_research", "community", "pushshift", "meta_ads"],
+  funding: ["techcrunch", "crunchbase", "news", "search", "web_research", "meta_ads"],
+  automation_need: ["reddit", "hackernews", "search", "web_research", "pushshift", "community", "meta_ads", "maps"],
+  tech_usage: ["stackshare", "github", "search", "web_research", "meta_ads"],
+  growth_activity: ["yc", "producthunt", "news", "search", "web_research", "wellfound", "linkedin", "meta_ads", "maps"],
+  partnership: ["search", "news", "linkedin", "meta_ads", "maps", "web_research"],
+  outbound_pain: ["reddit", "hackernews", "community", "search", "meta_ads"],
+  expansion: ["news", "search", "techcrunch", "web_research", "maps", "linkedin"],
+  migration: ["search", "reddit", "hackernews", "stackshare", "meta_ads"],
+  compliance: ["news", "search", "blogs", "meta_ads"],
+  burnout: ["reddit", "hackernews", "community", "jobs", "maps"],
 }
 
 let shuttingDown = false
@@ -413,6 +457,7 @@ export async function startSignalDiscovery(
       // ─────────────────────────────────────────────
       // Per-intent pipeline: generate → discover → filter → enrich
       // ─────────────────────────────────────────────
+      const INTENT_TIMEOUT_MS = 600000 // 10 min per intent max
       const contactQueue: {
         brandId: string; companyId: string; domain: string; name: string;
         summary: string; ragContext: string; clientId?: string; linkedinUrl?: string;
@@ -420,6 +465,7 @@ export async function startSignalDiscovery(
 
       for (const intent of intents) {
         if (shuttingDown) break
+        const intentStart = Date.now()
 
         // Step 1: Generate queries (or load from cache)
         let intentQueries: GeneratedQuery[]
@@ -431,8 +477,8 @@ export async function startSignalDiscovery(
           try {
             const output = await generateQueriesForIntent(intent, brand, ragSimilarIntents, clientId)
             queryCache.set(intent.id, runId, output)
-            await supabase.from("discovery_query_log").insert(
-              output.queries.map(q => ({
+            output.queries.forEach(q => {
+              bufferQueryLogEntry({
                 brand_id: brand.id,
                 intent_id: intent.id,
                 intent_text: intent.intent,
@@ -442,8 +488,8 @@ export async function startSignalDiscovery(
                 approved_count: 0,
                 lead_count: 0,
                 run_id: runId,
-              }))
-            )
+              })
+            })
             logger.info(
               `[QueryGen] Generated ${output.queries.length} queries for "${intent.intent}": ${output.queries.map(q => `[${q.adapter}:p${q.priority}] ${q.query}`).join(", ")}`
             )
@@ -914,6 +960,21 @@ export async function startSignalDiscovery(
               brand.brand_name, brand.product || "", brand.audience || "", brand, clientId
             )
           } catch { /* fallback to keyword-only */ }
+
+          // Hard rejection gate: if LLM says relevance < 30, skip this lead
+          if (llmScore && llmScore.relevance_score < 30) {
+            logger.info({ company: companyName, domain, llmRelevance: llmScore.relevance_score, reason: llmScore.fit_reason },
+              "Lead rejected by LLM fit assessment — company unlikely to opt for this service")
+            phase2Rejected.push({
+              brand_id: brand.id, client_id: clientId, name: companyName,
+              domain: `rejected-${phase2Rejected.length + 1}.result`, website: sourceUrl || null,
+              source_name: query.source, signal_type: query.signal,
+              enrichment_status: "rejected", error: `LLM fit rejection: ${llmScore.fit_reason}`,
+              raw_payload: { title: companyName, url: sourceUrl, summary: description, query: query.text, intent_id: query.intent_id, llmScore },
+            })
+            continue
+          }
+
           const { compositeScore } = computeCompositeScore({
             keywordScore, llmScore, domainQuality, signalStrength, extractionConfidence, coldStart,
           })
@@ -1032,6 +1093,9 @@ export async function startSignalDiscovery(
             }
           }
           logger.info({ intent: intent.intent, seedLeads: seedLeadsFound }, "Phase 4 seed extraction completed")
+        }
+        if (Date.now() - intentStart > INTENT_TIMEOUT_MS) {
+          logger.warn({ intent: intent.intent, elapsed: Date.now() - intentStart }, "Intent exceeded timeout, moving to next")
         }
       }
 

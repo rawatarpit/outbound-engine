@@ -66,7 +66,7 @@ export async function claimCompaniesForEnrichment(
     .in("id", ids)
     .eq("brand_id", brandId)
     .eq("enrichment_status", "approved")
-    .select()
+    .select("id, brand_id, name, website, domain, confidence, enrichment_attempts, raw_payload")
 
   if (updateError) throw updateError
 
