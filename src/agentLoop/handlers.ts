@@ -88,8 +88,25 @@ const KNOWN_NON_COMPANY_DOMAINS = new Set([
   "medium.com", "blogspot.com", "wordpress.com", "wixsite.com",
   "youtube.com", "facebook.com", "instagram.com", "twitter.com",
   "pinterest.com", "tumblr.com", "reddit.com", "quora.com",
-  "wikipedia.org", "github.com", "stackoverflow.com",
+  "wikipedia.org", "en.wikipedia.org", "github.com", "stackoverflow.com",
+  "claude.ai", "chatgpt.com", "google.com",
+  "ycombinator.com", "linkedin.com", "crunchbase.com",
+  "manta.com", "zippia.com", "lensa.com", "dribbble.com",
+  "builtin.com", "builtinnyc.com",
+  "visualcapitalist.com", "companiesmarketcap.com", "bestcompany.com",
+  "welcometothejungle.com", "glassdoor.com", "indeed.com",
+  "osmthome.com", "marcaria.com",
 ]);
+
+// Domains that look like article/blog publishers, not real companies
+function isNonCompanyDomain(domain: string): boolean {
+  if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) return true;
+  // Info/org/gov/edu domains that aren't companies
+  if (/\.(gov|edu|org|wiki)$/.test(domain) && !/\.co\.|\.com\.|\.io\./.test(domain)) return true;
+  // Blog platforms
+  if (/\.blog\.|substack\.|hashnode\.|dev\.to/.test(domain)) return true;
+  return false;
+}
 
 // Extract a clean company name from domain
 function companyNameFromDomain(domain: string): string {
@@ -99,6 +116,17 @@ function companyNameFromDomain(domain: string): string {
     .split(/[-_]/)
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+// Extract company name from a LinkedIn URL
+function linkedInCompanyName(url: string): string | null {
+  const match = url.match(/linkedin\.com\/company\/([^/?]+)/);
+  if (match) {
+    return match[1]
+      .replace(/[-_]/g, " ")
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  return null;
 }
 
 async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; queries: string[] }> {
@@ -111,7 +139,13 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
   // Build query from user's request
   const rawQuery = (input.query || "").replace(/^(find|search|discover|get)\s+/i, "").trim() ||
     (input.location ? `${industry} ${input.location}` : industry) || "companies";
-  queries = [rawQuery, `${rawQuery} company website`, `${rawQuery} -article -blog`];
+
+  // Use targeted queries: LinkedIn company pages + general web
+  queries = [
+    `linkedin.com/company "${rawQuery}"`,
+    `"${rawQuery}" company`,
+    `${rawQuery}`,
+  ];
 
   // Load already-seen domains from DB to avoid duplicates across batches
   const { data: existingCompanies } = await supabase
@@ -133,22 +167,29 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
 
   for (const r of allRaw) {
     const domain = r.url ? extractDomain(r.url) : null;
+    const url = r.url || "";
     if (!domain || seen.has(domain) || processedDomains.has(domain)) continue;
 
-    // Only skip truly non-company platforms
-    if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
+    // Skip non-company domains
+    if (isNonCompanyDomain(domain)) continue;
 
     processedDomains.add(domain);
 
-    // Derive name from domain (most reliable), fall back to company field
-    const name = r.company || companyNameFromDomain(domain);
+    // For LinkedIn URLs, extract company name from URL
+    let name = r.company || "";
+    if (!name && url.includes("linkedin.com/company/")) {
+      name = linkedInCompanyName(url) || "";
+    }
+    if (!name) {
+      name = companyNameFromDomain(domain);
+    }
     if (name.length < 2) continue;
 
     const { error: insertErr } = await supabase.from("companies").insert({
       domain, name, brand_id: brandId, source: r.url,
     });
     if (insertErr) {
-      logger.warn({ err: insertErr, domain }, "Failed to insert company");
+      logger.warn({ err: insertErr, domain, name }, "Failed to insert company");
       continue;
     }
 
