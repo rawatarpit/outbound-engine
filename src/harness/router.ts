@@ -47,20 +47,20 @@ const KEYWORD_ROUTES: Array<{
     extractParams: () => ({}),
   },
   {
-    patterns: [/enrich/i, /contacts?/i, /emails?/i, /find contacts?/i, /find emails?/i, /contact info/i, /get in touch/i, /reach out/i],
-    intent: "enrich",
-    confidence: 0.85,
-    extractParams: () => ({}),
-  },
-  {
     patterns: [/qualify/i, /score/i, /rate/i, /evaluate/i, /fit/i, /icp/i],
     intent: "qualify",
     confidence: 0.85,
     extractParams: () => ({}),
   },
   {
-    patterns: [/draft/i, /email/i, /outreach/i, /write/i, /compose/i, /create.*email/i, /generate.*email/i, /email.*sequence/i, /cold.*email/i],
+    patterns: [/draft/i, /outreach/i, /write/i, /compose/i, /create.*email/i, /generate.*email/i, /email.*sequence/i, /cold.*email/i, /(?:prepare|generate|compose)\s+(?:an?\s+)?email/i],
     intent: "outreach",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/enrich/i, /contacts?/i, /emails?/i, /find contacts?/i, /find emails?/i, /contact info/i, /get in touch/i, /reach out/i],
+    intent: "enrich",
     confidence: 0.85,
     extractParams: () => ({}),
   },
