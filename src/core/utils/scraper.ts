@@ -9,7 +9,7 @@ async function tryAxios(url: string): Promise<string | null> {
     const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
 
     const { data } = await axios.get(normalizedUrl, {
-      timeout: 10000,
+      timeout: 8000,
       maxRedirects: 3,
       validateStatus: (status) => status < 500,
     });
@@ -38,7 +38,7 @@ async function tryPlaywright(url: string, maxChars: number): Promise<string | nu
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
-      await page.goto(url, { waitUntil: "networkidle", timeout: 15000 })
+      await page.goto(url, { waitUntil: "networkidle", timeout: 8000 })
       const text = await page.evaluate(() => document.body.innerText)
       return text.slice(0, maxChars)
     } finally {
