@@ -6,7 +6,7 @@ import { getClientLLMSettings } from "../db/supabase";
 const logger = pino({ level: "info" });
 
 const MAX_RETRIES = 0;
-const TIMEOUT_MS = 30000;
+const TIMEOUT_MS = 60000;
 
 class RateLimiter {
   private maxRequests: number;

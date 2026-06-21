@@ -136,8 +136,101 @@ function templateSynthesizer(
 export async function synthesizeResults(
   input: SynthesizerInput,
 ): Promise<z.infer<typeof SynthesizerResultSchema>> {
-  const { userMessage, results, brand } = input;
+  const { userMessage, results, brand, stage, searchQueries, intentDescription, previousMessages } = input;
 
-  // Skip LLM synthesizer (times out at 30s) and use template directly
-  return templateSynthesizer(userMessage, results, brand.brand_name);
+  if (results.length === 0 && stage === "init") {
+    return templateSynthesizer(userMessage, results, brand.brand_name);
+  }
+
+  const successes = results.filter((r) => r.status === "success");
+  const errors = results.filter((r) => r.status === "error");
+
+  const resultsSummary = results.map((r) => {
+    const out = r.output as any;
+    let summary = "";
+    if (r.tool === "discover_leads") summary = `${out?.leads?.length ?? 0} leads found`;
+    else if (r.tool === "research_leads") summary = `${out?.researched?.length ?? 0} companies researched`;
+    else if (r.tool === "enrich_leads") summary = `${out?.contacts?.length ?? 0} contacts found`;
+    else if (r.tool === "qualify_leads") summary = `${out?.qualified?.length ?? 0} companies qualified`;
+    else if (r.tool === "draft_emails") summary = `${out?.drafts?.length ?? 0} drafts created`;
+    else if (r.tool === "send_emails") summary = "sent";
+    else summary = JSON.stringify(out).slice(0, 200);
+    return `${r.tool}: ${r.status} — ${summary}`;
+  }).join("\n");
+
+  const pipelineStageDescriptions: Record<string, string> = {
+    init: "Conversation just started. No leads found yet.",
+    discovery: "Leads have been found. User may want to research, enrich, or qualify them.",
+    research: "Leads have been researched. User may want enrichment or qualification next.",
+    enrich: "Contacts have been found. User may want qualification or outreach next.",
+    qualify: "Leads have been scored. User may want drafts or pipeline review.",
+    draft: "Drafts are ready. User may want to send or review.",
+    send: "Emails have been sent. User may want to save this campaign or start fresh.",
+    done: "Pipeline complete.",
+  };
+
+  try {
+    const prompt = `You are a sales assistant for ${brand.brand_name}. Generate a helpful response to the user.
+
+Brand context:
+${brand.positioning ? `- Positioning: ${brand.positioning}` : ""}
+${brand.core_offer ? `- Core offer: ${brand.core_offer}` : ""}
+${brand.tone ? `- Tone: ${brand.tone}` : ""}
+${brand.audience ? `- Audience: ${brand.audience}` : ""}
+
+Current pipeline stage: ${stage}
+${pipelineStageDescriptions[stage] || ""}
+${searchQueries.length > 0 ? `Search queries used: ${searchQueries.join(", ")}` : ""}
+${intentDescription ? `Intent: ${intentDescription}` : ""}
+
+Tool execution results:
+${resultsSummary}
+${errors.length > 0 ? `\nErrors: ${errors.map(e => `${e.tool}: ${e.error}`).join("; ")}` : ""}
+
+Previous conversation context:
+${previousMessages || "(none)"}
+
+User message: ${userMessage}
+
+Rules:
+- Be concise and direct. No fluff.
+- If errors occurred, acknowledge them and suggest retrying.
+- Suggest 2-4 natural next actions based on the pipeline stage and results.
+- If this is the first interaction (no tool results), introduce yourself briefly.
+- If the user provided specific criteria (location, industry), confirm you understood them.
+- Tone: ${brand.tone || "professional and helpful"}
+- At the end, if the pipeline is complete (emails sent) and results were positive, include a saveCampaign offering to save.
+
+${errors.length === results.length && results.length > 0 ?
+  "All steps failed. Offer to retry or ask the user to refine their request." : ""}
+
+${results.some(r => r.tool === "send_emails" && r.status === "success") ?
+  `The send step just completed successfully. Offer to save the campaign with a saveCampaign block.` : ""}
+
+Respond with valid JSON only:
+{
+  "message": "your response here",
+  "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
+  "askClarification": null,
+  "saveCampaign": null
+}
+
+If the pipeline is complete and send succeeded, include:
+{
+  "message": "...",
+  "suggestions": [...],
+  "saveCampaign": {
+    "shouldSave": true,
+    "summary": "brief summary of what was done",
+    "queries": ${JSON.stringify(searchQueries)}
+  }
+}`;
+
+    const result = await generateStructured(prompt, SynthesizerResultSchema, 0.2, brand.client_id, 500, undefined, 60000);
+    logger.info({ stage, resultLen: result.message.length }, "Response synthesized (LLM)");
+    return result;
+  } catch (err) {
+    logger.warn({ err }, "LLM synthesizer failed, using template fallback");
+    return templateSynthesizer(userMessage, results, brand.brand_name);
+  }
 }

@@ -74,6 +74,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopOutp
     brand,
     intent: intent as RouterOutput,
     sessionId: session.id,
+    onProgress: input.onProgress,
   });
 
   // Build plan from results for backward compatibility

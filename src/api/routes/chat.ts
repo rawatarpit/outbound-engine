@@ -48,6 +48,7 @@ router.post("/", async (req: Request, res: Response) => {
         sendEvent(event.type, {
           step_id: event.step_id,
           tool: event.tool,
+          detail: event.detail,
           data: event.data,
           error: event.error,
         });

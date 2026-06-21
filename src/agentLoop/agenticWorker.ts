@@ -4,8 +4,8 @@ import { reasonNextTools } from "./reasoner";
 import { executeTool, ToolInput } from "./handlers";
 import { synthesizeResults } from "../harness/synthesizer";
 import {
-  PipelineState, UserPreferences, ReasonerOutput, ReasonedToolCall,
-  AgenticState, AgenticTurn, AgenticToolCallRecord, StepResult, RouterOutput, SynthesizerOutput,
+  PipelineState, ReasonerOutput, ReasonedToolCall,
+  StepResult, RouterOutput, SynthesizerOutput, ProgressCallback,
 } from "../harness/types";
 import {
   getSession, addMessage, getPipelineState, updatePipelineState, setPipelineStage,
@@ -21,6 +21,7 @@ interface AgenticWorkerInput {
   brand: BrandProfile;
   intent: RouterOutput;
   sessionId: string;
+  onProgress?: ProgressCallback;
 }
 
 interface AgenticWorkerOutput {
@@ -31,15 +32,18 @@ interface AgenticWorkerOutput {
 }
 
 export async function runAgenticWorker(input: AgenticWorkerInput): Promise<AgenticWorkerOutput> {
-  const { message, brand, intent, sessionId } = input;
+  const { message, brand, intent, sessionId, onProgress } = input;
   const preferences = getUserPreferences(sessionId);
   const conversationContext = getConversationContext(sessionId);
+  const emit = onProgress || (() => {});
 
   let allResults: StepResult[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    // Refresh pipeline state each turn to see updated results
     const state = getPipelineState(sessionId)!;
+
+    // LLM reasoning step
+    emit({ type: "llm_start", detail: "Reasoning about which tools to call..." });
     const decision = await reasonNextTools({
       intent: intent.intent,
       parameters: intent.parameters,
@@ -50,26 +54,25 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
     });
 
     if (decision.isFinal || decision.toolCalls.length === 0) {
+      emit({ type: "llm_result", detail: "No more tools needed" });
       break;
     }
+    emit({ type: "llm_result", detail: `Planning ${decision.toolCalls.length} tool(s): ${decision.toolCalls.map(t => t.name).join(", ")}` });
 
-    // Group tool calls by parallel_group for concurrent execution
     const groups = groupByParallelGroup(decision.toolCalls);
     for (const group of groups) {
-      const batchResults = await executeToolGroup(group, brand, sessionId);
+      const batchResults = await executeToolGroup(group, brand, sessionId, emit);
       allResults.push(...batchResults);
-
-      // Update pipeline state with results
       updatePipelineStateFromResults(sessionId, batchResults, decision, state!);
     }
 
-    // Increment batch count if discovery was run
     if (allResults.some(r => r.tool === "discover_leads" && r.status === "success")) {
       incrementBatchCount(sessionId);
     }
   }
 
-  // Synthesize final response
+  // LLM synthesis step
+  emit({ type: "llm_start", detail: "Synthesizing results into a response..." });
   const newStage = getPipelineState(sessionId)?.stage || "init";
   const response = await synthesizeResults({
     userMessage: message,
@@ -80,6 +83,7 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
     intentDescription: intent.intent,
     previousMessages: conversationContext,
   });
+  emit({ type: "llm_result", detail: "Response ready" });
 
   addMessage(sessionId, {
     role: "assistant",
@@ -105,16 +109,13 @@ function groupByParallelGroup(toolCalls: ReasonedToolCall[]): ReasonedToolCall[]
     groups.get(groupKey)!.push(tc);
   }
 
-  // Check for dependent groups
   const ordered: ReasonedToolCall[][] = [];
   const resolved = new Set<string>();
   const groupOrder = [...groups.keys()];
 
-  // Simple dependency resolution: groups with depends_on on tools in earlier groups
   const groupDepends = new Map<string, string[]>();
   for (const [gKey, tools] of groups) {
     const deps = tools.flatMap(t => t.depends_on);
-    // Find which groups these dependencies belong to
     const depGroups = deps.map(d => {
       for (const [gk, gt] of groups) {
         if (gt.some(t => t.name === d)) return gk;
@@ -124,7 +125,6 @@ function groupByParallelGroup(toolCalls: ReasonedToolCall[]): ReasonedToolCall[]
     groupDepends.set(gKey, [...new Set(depGroups)]);
   }
 
-  // Topological sort (simple)
   while (ordered.length < groupOrder.length) {
     for (const [gKey, deps] of groupDepends) {
       if (resolved.has(gKey)) continue;
@@ -138,19 +138,18 @@ function groupByParallelGroup(toolCalls: ReasonedToolCall[]): ReasonedToolCall[]
   return ordered.length > 0 ? ordered : groupOrder.map(g => groups.get(g)!);
 }
 
-async function executeToolGroup(group: ReasonedToolCall[], brand: BrandProfile, sessionId: string): Promise<StepResult[]> {
-  // Limit concurrent calls
+async function executeToolGroup(group: ReasonedToolCall[], brand: BrandProfile, sessionId: string, emit: (e: Parameters<ProgressCallback>[0]) => void): Promise<StepResult[]> {
   const limited = group.slice(0, MAX_CONCURRENT);
-  const stepId = `${Date.now()}`;
+  const baseStepId = `${Date.now()}`;
 
   const results = await Promise.allSettled(
-    limited.map((tc, i) => executeSingleTool(tc, brand, `${stepId}_${i}`))
+    limited.map((tc, i) => executeSingleTool(tc, brand, `${baseStepId}_${i}`, emit))
   );
 
   return results.map((r, i) => {
     if (r.status === "fulfilled") return r.value;
     return {
-      step_id: `${stepId}_${i}`,
+      step_id: `${baseStepId}_${i}`,
       tool: limited[i].name,
       status: "error" as const,
       output: null,
@@ -160,10 +159,12 @@ async function executeToolGroup(group: ReasonedToolCall[], brand: BrandProfile, 
   });
 }
 
-async function executeSingleTool(tc: ReasonedToolCall, brand: BrandProfile, stepId: string): Promise<StepResult> {
+async function executeSingleTool(tc: ReasonedToolCall, brand: BrandProfile, stepId: string, emit: (e: Parameters<ProgressCallback>[0]) => void): Promise<StepResult> {
   const start = Date.now();
+  emit({ type: "step_start", step_id: stepId, tool: tc.name, detail: `Running ${tc.name}...` });
   try {
     const output = await executeTool(tc.name, tc.input as ToolInput);
+    emit({ type: "step_result", step_id: stepId, tool: tc.name, detail: `${tc.name} completed`, data: output });
     return {
       step_id: stepId,
       tool: tc.name,
@@ -172,6 +173,7 @@ async function executeSingleTool(tc: ReasonedToolCall, brand: BrandProfile, step
       duration_ms: Date.now() - start,
     };
   } catch (err: any) {
+    emit({ type: "step_error", step_id: stepId, tool: tc.name, error: err.message });
     return {
       step_id: stepId,
       tool: tc.name,

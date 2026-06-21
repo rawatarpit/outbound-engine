@@ -12,20 +12,124 @@ const RouterSchema = z.object({
   missingParams: z.array(z.string()),
 });
 
-const routerCache = new Map<string, { result: z.infer<typeof RouterSchema>; expiry: number }>();
+type RouterResult = z.infer<typeof RouterSchema>;
+
+const routerCache = new Map<string, { result: RouterResult; expiry: number }>();
 const CACHE_TTL = 5 * 60 * 1000;
+
+const KEYWORD_ROUTES: Array<{
+  patterns: RegExp[];
+  intent: RouterResult["intent"];
+  confidence: number;
+  extractParams: (msg: string) => Record<string, unknown>;
+}> = [
+  {
+    patterns: [/find/i, /search/i, /discover/i, /look for/i, /find me/i, /show me/i, /get me/i],
+    intent: "discover",
+    confidence: 0.85,
+    extractParams: (msg: string) => {
+      const params: Record<string, unknown> = {};
+      const locMatch = msg.match(/(?:in|near|around|based in|located in)\s+([a-zA-Z\s,]+?)(?:\s+(?:that|which|with|and|for|companies|businesses|leads)|$)/i);
+      if (locMatch) params.location = locMatch[1].trim();
+      const indMatch = msg.match(/([\w\s]+?)\s+(?:companies|businesses|firms|startups|leads|prospects)/i);
+      if (indMatch && indMatch[1] && !indMatch[1].match(/^(find|search|discover|show|get|look for|in|near|some|more|the)$/i)) {
+        params.industry = indMatch[1].trim();
+      }
+      const cntMatch = msg.match(/(\d+)\s*(?:leads?|companies?|results?)/i);
+      if (cntMatch) params.lead_count = parseInt(cntMatch[1]);
+      return params;
+    },
+  },
+  {
+    patterns: [/research/i, /investigate/i, /learn about/i, /find info/i, /tell me about/i, /background/i],
+    intent: "research",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/enrich/i, /contacts?/i, /emails?/i, /find contacts?/i, /find emails?/i, /contact info/i, /get in touch/i, /reach out/i],
+    intent: "enrich",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/qualify/i, /score/i, /rate/i, /evaluate/i, /fit/i, /icp/i],
+    intent: "qualify",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/draft/i, /email/i, /outreach/i, /write/i, /compose/i, /create email/i],
+    intent: "outreach",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/send/i, /send email/i, /send draft/i, /dispatch/i],
+    intent: "send",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/pipeline/i, /status/i, /progress/i, /where/i, /how far/i, /what.*done/i, /show.*pipeline/i],
+    intent: "pipeline",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+  {
+    patterns: [/analyze/i, /reply/i, /respond/i, /response/i, /follow.up/i],
+    intent: "analyze",
+    confidence: 0.85,
+    extractParams: () => ({}),
+  },
+];
+
+function keywordRouteIntent(message: string): RouterResult | null {
+  const lower = message.toLowerCase();
+
+  // Greeting / chitchat — route as chat
+  if (/^(hi|hey|hello|good\s*(morning|afternoon|evening)|what'?s?\s*up|sup|howdy)\b/i.test(lower)) {
+    return { intent: "chat", confidence: 0.9, parameters: {}, missingParams: [] };
+  }
+  if (/^(thanks?|thank you|appreciate|great|awesome|perfect)\b/i.test(lower)) {
+    return { intent: "chat", confidence: 0.9, parameters: {}, missingParams: [] };
+  }
+
+  for (const route of KEYWORD_ROUTES) {
+    if (route.patterns.some(p => p.test(lower))) {
+      const params = route.extractParams(message);
+      logger.info({ intent: route.intent, params, source: "keyword" }, "Keyword router matched");
+      return {
+        intent: route.intent,
+        confidence: route.confidence,
+        parameters: params,
+        missingParams: [],
+      };
+    }
+  }
+
+  return null;
+}
 
 export async function routeIntent(
   message: string,
   brand: BrandProfile,
   conversationContext?: string,
-): Promise<z.infer<typeof RouterSchema>> {
+): Promise<RouterResult> {
   const cacheKey = `${brand.id}:${message.slice(0, 200)}`;
   const cached = routerCache.get(cacheKey);
   if (cached && Date.now() < cached.expiry) {
     return cached.result;
   }
 
+  // Keyword fast path (instant, no LLM)
+  const keywordResult = keywordRouteIntent(message);
+  if (keywordResult) {
+    routerCache.set(cacheKey, { result: keywordResult, expiry: Date.now() + CACHE_TTL });
+    return keywordResult;
+  }
+
+  // LLM fallback (15s timeout — Llama 3.1 8B should handle this easily)
   const prompt = `You are a sales engagement router for ${brand.brand_name}. Classify the user's intent and extract structured parameters.
 
 ${brand.positioning ? `Brand positioning: ${brand.positioning}` : ""}
@@ -72,9 +176,9 @@ Respond with valid JSON only:
 }`;
 
   try {
-    const result = await generateStructured(prompt, RouterSchema, 0.1, brand.client_id, 300, undefined, 30000);
+    const result = await generateStructured(prompt, RouterSchema, 0.1, brand.client_id, 300, undefined, 60000);
     routerCache.set(cacheKey, { result, expiry: Date.now() + CACHE_TTL });
-    logger.info({ intent: result.intent, confidence: result.confidence, params: result.parameters }, "Intent routed");
+    logger.info({ intent: result.intent, confidence: result.confidence, params: result.parameters }, "Intent routed (LLM)");
     return result;
   } catch (err) {
     logger.error({ err }, "LLM router failed");

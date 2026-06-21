@@ -202,10 +202,13 @@ export interface StepResult {
   duration_ms: number;
 }
 
+export type ProgressEventType = "step_start" | "step_result" | "step_error" | "llm_start" | "llm_result" | "llm_error";
+
 export type ProgressCallback = (event: {
-  type: "step_start" | "step_result" | "step_error";
-  step_id: string;
-  tool: string;
+  type: ProgressEventType;
+  step_id?: string;
+  tool?: string;
+  detail?: string;
   data?: unknown;
   error?: string;
 }) => void;
