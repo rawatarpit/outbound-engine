@@ -24,7 +24,7 @@ const KEYWORD_ROUTES: Array<{
   extractParams: (msg: string) => Record<string, unknown>;
 }> = [
   {
-    patterns: [/find/i, /search/i, /discover/i, /look for/i, /find me/i, /show me/i, /get me/i, /need.*(leads|companies|prospects)/i, /looking for/i, /help.*find/i, /hunt/i],
+    patterns: [/find/i, /\bsearch\b/i, /discover/i, /look for/i, /find me/i, /show me/i, /get me/i, /need.*(leads|companies|prospects)/i, /looking for/i, /help.*find/i, /hunt/i],
     intent: "discover",
     confidence: 0.85,
     extractParams: (msg: string) => {
