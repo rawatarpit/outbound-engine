@@ -371,7 +371,13 @@ async function enrichLeads(input: ToolInput): Promise<{ contacts: unknown[] }> {
   for (let i = 0; i < toProcess.length; i += CONCURRENCY) {
     const batch = toProcess.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
-      batch.map(company => multiSourceEnrich(company))
+      batch.map(company => {
+        const TIMEOUT_MS = 60000;
+        return Promise.race([
+          multiSourceEnrich(company),
+          new Promise<[]>((_, reject) => setTimeout(() => reject(new Error("Per-company enrich timeout")), TIMEOUT_MS)),
+        ]);
+      })
     );
     for (const r of results) {
       if (r.status === "fulfilled") {
@@ -387,12 +393,13 @@ async function enrichLeads(input: ToolInput): Promise<{ contacts: unknown[] }> {
 async function multiSourceEnrich(company: CompanyRef): Promise<unknown[]> {
   const domain = company.domain || "";
 
-  // Phase 1: Gather from multiple sources in parallel
+  // Phase 1: Gather from multiple sources in parallel (30s per-company timeout)
   const searches = ENRICH_SEARCHES.map(fn => fn(company.name))
     .map(query => executeScraplingSearch(query, "google", 8).catch(() => []));
 
-  // Try multiple company page paths in parallel
-  const pageScrapes = domain
+  // Only scrape company pages if domain looks like a real company site (not blog/article)
+  const isGenericDomain = !domain || domain.includes("example") || /\.(blog|medium|wordpress)\./.test(domain) || !domain.includes(".");
+  const pageScrapes = domain && !isGenericDomain
     ? COMPANY_PAGE_PATHS.map(p => scrapeUrl(`https://${domain}${p}`, 5000).catch(() => null))
     : [];
 
