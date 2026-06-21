@@ -164,18 +164,21 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
 
       const lead = { name: finalName, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
       leads.push(lead);
-      try {
-        const { data: existing } = await supabase
-          .from("companies")
-          .select("id")
-          .eq("domain", domain)
-          .eq("brand_id", brandId)
-          .limit(1);
-        if (!existing || existing.length === 0) {
-          await supabase.from("companies").insert({ domain, name: finalName, brand_id: brandId, source: r.url });
+      const { error: selectErr, data: existing } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("domain", domain)
+        .eq("brand_id", brandId)
+        .limit(1);
+      if (selectErr) {
+        logger.warn({ err: selectErr, domain }, "Failed to check existing company");
+      } else if (!existing || existing.length === 0) {
+        const { error: insertErr } = await supabase.from("companies").insert({ domain, name: finalName, brand_id: brandId, source: r.url });
+        if (insertErr) {
+          logger.warn({ err: insertErr, domain }, "Failed to insert company");
+          seen.delete(domain);
+          leads.pop();
         }
-      } catch (e: any) {
-        logger.warn({ err: e, domain }, "Failed to save company");
       }
       if (leads.length >= maxLeads) break;
     }
@@ -197,13 +200,14 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
     if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
     seen.add(domain);
     const name = r.company || companyNameFromDomain(domain);
+    const { error: insertErr } = await supabase.from("companies").insert({ domain, name, brand_id: brandId, source: r.url });
+    if (insertErr) {
+      logger.warn({ err: insertErr, domain }, "Failed to insert company in fallback");
+      seen.delete(domain);
+      continue;
+    }
     const lead = { name, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
     leads.push(lead);
-    try {
-      await supabase.from("companies").insert({ domain, name, brand_id: brandId, source: r.url });
-    } catch (e: any) {
-      logger.warn({ err: e, domain }, "Failed to save company");
-    }
     if (leads.length >= maxLeads) break;
   }
 
