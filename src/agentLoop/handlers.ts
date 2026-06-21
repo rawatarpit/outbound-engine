@@ -106,30 +106,12 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
   let queries = input.search_queries || [];
   const maxLeads = input.max_leads || 10;
   const offset = (input.offset as number) || 0;
+  const industry = (input.industry || "") as string;
 
-  // Generate search queries from input parameters if none provided
-  if (queries.length === 0) {
-    const location = (input.location || input.query || "") as string;
-    const industry = (input.industry || "") as string;
-    if (location && industry) {
-      queries = [
-        `"${industry}" ${location} company`,
-        `"${industry}" "${location}"`,
-        `${industry} companies in ${location}`,
-        `"${location}" "${industry}" -top -best -review -list`,
-      ];
-    } else if (location) {
-      queries = [
-        `companies in ${location} -top -best -review`,
-        `"${location}" business`,
-      ];
-    } else if (industry) {
-      queries = [
-        `"${industry}" company -top -best -review`,
-        `${industry} companies`,
-      ];
-    }
-  }
+  // Build query from user's request
+  const rawQuery = (input.query || "").replace(/^(find|search|discover|get)\s+/i, "").trim() ||
+    (input.location ? `${industry} ${input.location}` : industry) || "companies";
+  queries = [rawQuery, `${rawQuery} company website`, `${rawQuery} -article -blog`];
 
   // Load already-seen domains from DB to avoid duplicates across batches
   const { data: existingCompanies } = await supabase
@@ -139,81 +121,44 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
     .not("domain", "is", null);
   const seen = new Set<string>((existingCompanies ?? []).map(c => c.domain).filter(Boolean));
 
+  // Collect fresh results from multiple queries
+  const allRaw: ScraplingResult[] = [];
+  for (const q of queries.slice(0, 3)) {
+    const results = await executeScraplingSearch(q, "google", 15 + offset).catch(() => []);
+    allRaw.push(...results);
+  }
+
   const leads: any[] = [];
+  const processedDomains = new Set<string>();
 
-  for (const q of queries.slice(0, 5)) {
-    const webResults = await executeScraplingSearch(q, "google", 10 + offset).catch(() => []);
-
-    for (const r of webResults) {
-      const domain = r.url ? extractDomain(r.url) : null;
-      if (!domain || seen.has(domain)) continue;
-
-      // Skip known non-company domains
-      if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
-
-      // Skip URLs that look like articles
-      const url = (r.url || "").toLowerCase();
-      if (/\/blog\b|\/article\b|\/news\b|\/202[0-9]\/|\/[0-9]{4}\/[0-9]{2}\//.test(url)) continue;
-
-      seen.add(domain);
-
-      // Extract company name: prefer result.company, then domain-derived, then cleaned title
-      const cleanedTitle = r.title?.split(" - ")[0]?.split(" | ")[0]?.split(" — ")[0]?.trim() || "";
-      const name = r.company || companyNameFromDomain(domain);
-      const finalName = name.length > 3 ? name : (cleanedTitle || name);
-
-      const lead = { name: finalName, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
-      leads.push(lead);
-      const { error: selectErr, data: existing } = await supabase
-        .from("companies")
-        .select("id")
-        .eq("domain", domain)
-        .eq("brand_id", brandId)
-        .limit(1);
-      if (selectErr) {
-        logger.warn({ err: selectErr, domain }, "Failed to check existing company");
-      } else if (!existing || existing.length === 0) {
-        const { error: insertErr } = await supabase.from("companies").insert({ domain, name: finalName, brand_id: brandId, source: r.url });
-        if (insertErr) {
-          logger.warn({ err: insertErr, domain }, "Failed to insert company");
-          seen.delete(domain);
-          leads.pop();
-        }
-      }
-      if (leads.length >= maxLeads) break;
-    }
-    if (leads.length >= maxLeads) break;
-  }
-
-  // If we found leads with targeted queries, return
-  if (leads.length > 0) {
-    logger.info({ brandId, leadCount: leads.length, totalSeen: seen.size }, "Discovery completed");
-    return { leads, queries };
-  }
-
-  // Fallback: broader search without filters
-  const fallbackQuery = (input.location || input.query || "") as string || "companies";
-  const fallbackResults = await executeScraplingSearch(fallbackQuery, "google", 10 + offset).catch(() => []);
-  for (const r of fallbackResults) {
+  for (const r of allRaw) {
     const domain = r.url ? extractDomain(r.url) : null;
-    if (!domain || seen.has(domain)) continue;
+    if (!domain || seen.has(domain) || processedDomains.has(domain)) continue;
+
+    // Only skip truly non-company platforms
     if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
-    seen.add(domain);
+
+    processedDomains.add(domain);
+
+    // Derive name from domain (most reliable), fall back to company field
     const name = r.company || companyNameFromDomain(domain);
-    const { error: insertErr } = await supabase.from("companies").insert({ domain, name, brand_id: brandId, source: r.url });
+    if (name.length < 2) continue;
+
+    const { error: insertErr } = await supabase.from("companies").insert({
+      domain, name, brand_id: brandId, source: r.url,
+    });
     if (insertErr) {
-      logger.warn({ err: insertErr, domain }, "Failed to insert company in fallback");
-      seen.delete(domain);
+      logger.warn({ err: insertErr, domain }, "Failed to insert company");
       continue;
     }
-    const lead = { name, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
-    leads.push(lead);
+
+    leads.push({ name, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId });
     if (leads.length >= maxLeads) break;
   }
 
-  if (leads.length > 0) {
-    return { leads, queries };
-  }
+  logger.info({ brandId, leadCount: leads.length, totalResults: allRaw.length }, "Discovery completed");
+
+  if (leads.length > 0) return { leads, queries };
 
   // Last resort: signal discovery
   try {
