@@ -83,34 +83,13 @@ async function searchWeb(input: ToolInput): Promise<{ results: { title: string; 
   };
 }
 
-// Skip results that are clearly articles/listicles, not company pages
-function looksLikeCompanyResult(r: ScraplingResult): boolean {
-  const title = (r.title || "").trim();
-  const url = (r.url || "").toLowerCase();
-  const domain = extractDomain(r.url || "");
-
-  // Skip listicle/article patterns
-  const listiclePatterns = /^(top|best|\d+)\s/i;
-  if (listiclePatterns.test(title)) return false;
-
-  // Skip known non-company publishers
-  const badDomains = [
-    "medium.com", "blogspot.com", "wordpress.com", "wixsite.com",
-    "youtube.com", "facebook.com", "instagram.com", "twitter.com",
-    "pinterest.com", "tumblr.com", "reddit.com", "quora.com",
-    "wikipedia.org", "cambridge.org", "apple.com", "microsoft.com",
-    "github.com", "stackoverflow.com", "amazon.com",
-  ];
-  if (domain && badDomains.some(d => domain.includes(d))) return false;
-
-  // Skip URLs that look like articles (contain /blog/, /article/, /news/, etc.)
-  if (/\/blog\b|\/article\b|\/news\b|\/202[0-9]\/|\/[0-9]{4}\/[0-9]{2}\//.test(url)) return false;
-
-  // Skip very long titles (definitely articles)
-  if (title.length > 80) return false;
-
-  return true;
-}
+// Known non-company domains to skip
+const KNOWN_NON_COMPANY_DOMAINS = new Set([
+  "medium.com", "blogspot.com", "wordpress.com", "wixsite.com",
+  "youtube.com", "facebook.com", "instagram.com", "twitter.com",
+  "pinterest.com", "tumblr.com", "reddit.com", "quora.com",
+  "wikipedia.org", "github.com", "stackoverflow.com",
+]);
 
 // Extract a clean company name from domain
 function companyNameFromDomain(domain: string): string {
@@ -134,23 +113,20 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
     const industry = (input.industry || "") as string;
     if (location && industry) {
       queries = [
-        `site:linkedin.com/company "${industry}" "${location}"`,
-        `"${industry}" "${location}" "official website"`,
-        `"${industry}" "${location}" company`,
-        `${industry} companies in ${location} -top -best -review`,
-        `${industry} ${location} -top -best -review`,
+        `"${industry}" ${location} company`,
+        `"${industry}" "${location}"`,
+        `${industry} companies in ${location}`,
+        `"${location}" "${industry}" -top -best -review -list`,
       ];
     } else if (location) {
       queries = [
-        `site:linkedin.com/company "${location}"`,
         `companies in ${location} -top -best -review`,
-        `"based in ${location}" company`,
+        `"${location}" business`,
       ];
     } else if (industry) {
       queries = [
-        `site:linkedin.com/company "${industry}"`,
         `"${industry}" company -top -best -review`,
-        `"${industry}" "official website"`,
+        `${industry} companies`,
       ];
     }
   }
@@ -169,17 +145,24 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
     const webResults = await executeScraplingSearch(q, "google", 10 + offset).catch(() => []);
 
     for (const r of webResults) {
-      if (!looksLikeCompanyResult(r)) continue;
       const domain = r.url ? extractDomain(r.url) : null;
       if (!domain || seen.has(domain)) continue;
+
+      // Skip known non-company domains
+      if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
+
+      // Skip URLs that look like articles
+      const url = (r.url || "").toLowerCase();
+      if (/\/blog\b|\/article\b|\/news\b|\/202[0-9]\/|\/[0-9]{4}\/[0-9]{2}\//.test(url)) continue;
+
       seen.add(domain);
 
       // Extract company name: prefer result.company, then domain-derived, then cleaned title
+      const cleanedTitle = r.title?.split(" - ")[0]?.split(" | ")[0]?.split(" — ")[0]?.trim() || "";
       const name = r.company || companyNameFromDomain(domain);
-      const cleanedTitle = r.title?.split(" - ")[0]?.split(" | ")[0]?.split(" — ")[0]?.trim();
       const finalName = name.length > 3 ? name : (cleanedTitle || name);
 
-      const lead = { name: finalName, domain, source: r.url, summary: r.body || r.title || "", brand_id: brandId };
+      const lead = { name: finalName, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
       leads.push(lead);
       try {
         const { data: existing } = await supabase
@@ -199,23 +182,22 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
     if (leads.length >= maxLeads) break;
   }
 
+  // If we found leads with targeted queries, return
   if (leads.length > 0) {
     logger.info({ brandId, leadCount: leads.length, totalSeen: seen.size }, "Discovery completed");
     return { leads, queries };
   }
 
-  // Fallback: broader search
-  const location = (input.location || input.query || "") as string;
-  const industry = (input.industry || "") as string;
-  const fallbackQuery = location && industry ? `${industry} ${location}` : location || industry || "companies";
+  // Fallback: broader search without filters
+  const fallbackQuery = (input.location || input.query || "") as string || "companies";
   const fallbackResults = await executeScraplingSearch(fallbackQuery, "google", 10 + offset).catch(() => []);
   for (const r of fallbackResults) {
-    if (!looksLikeCompanyResult(r)) continue;
     const domain = r.url ? extractDomain(r.url) : null;
     if (!domain || seen.has(domain)) continue;
+    if (KNOWN_NON_COMPANY_DOMAINS.has(domain)) continue;
     seen.add(domain);
     const name = r.company || companyNameFromDomain(domain);
-    const lead = { name, domain, source: r.url, summary: r.body || r.title || "", brand_id: brandId };
+    const lead = { name, domain, source: r.url, summary: (r.body || r.title || "").slice(0, 500), brand_id: brandId };
     leads.push(lead);
     try {
       await supabase.from("companies").insert({ domain, name, brand_id: brandId, source: r.url });
