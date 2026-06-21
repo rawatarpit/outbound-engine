@@ -19,3 +19,12 @@ export const DomainReputationConfig = {
   HOURLY_SEND_WARNING: 0.8,
   DAILY_SEND_WARNING: 0.9,
 } as const;
+
+export const OrchestratorConfig = {
+  MAX_PLAN_STEPS: 20,
+  PARALLEL_BATCH_SIZE: 5,
+  CACHE_TTL_MS: 5 * 60 * 1000,
+  MAX_LEADS_PER_QUERY: 10,
+  SESSION_TTL_MS: 60 * 60 * 1000,
+  MAX_ITERATIONS: 15,
+} as const;

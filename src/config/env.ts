@@ -17,6 +17,10 @@ const EnvSchema = z.object({
 
   RESEND_WEBHOOK_SECRET: z.string().optional(),
 
+  PORT: z.coerce.number().default(3001),
+
+  JWT_SECRET: z.string().optional(),
+
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

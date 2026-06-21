@@ -4,6 +4,18 @@ import { scrapeUrl } from "../core/utils/scraper";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { generateStructured } from "../llm/ollama";
+import { supabase } from "../db/supabase";
+import {
+  researchResultSchema,
+  qualificationResultSchema,
+  outreachResultSchema,
+} from "../agents/types";
+import {
+  buildResearchPrompt,
+  buildQualificationPrompt,
+  buildOutreachPrompt,
+} from "./promptBuilder";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,11 +72,30 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       core_offer: z.string(),
       audience: z.string(),
       website_content: z.string(),
+      client_id: z.string().optional(),
       context_preamble: z.string().optional(),
       compaction: z.string().optional(),
     }),
-    executor: async () => {
-      throw new Error("generate_research is handled by the research agent directly");
+    executor: async (input: {
+      brand_name: string;
+      positioning: string;
+      core_offer: string;
+      audience: string;
+      website_content: string;
+      client_id?: string;
+      context_preamble?: string;
+      compaction?: string;
+    }) => {
+      const prompt = buildResearchPrompt({
+        brandName: input.brand_name,
+        positioning: input.positioning,
+        coreOffer: input.core_offer,
+        audience: input.audience,
+        content: input.website_content,
+        contextPreamble: input.context_preamble,
+        compaction: input.compaction,
+      });
+      return generateStructured(prompt, researchResultSchema, 0.3, input.client_id);
     },
     metadata: {
       category: "compute",
@@ -89,10 +120,29 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       pain_points: z.string(),
       automation_maturity: z.string(),
       buying_signals: z.string(),
+      client_id: z.string().optional(),
       context_preamble: z.string().optional(),
     }),
-    executor: async () => {
-      throw new Error("score_qualification is handled by the qualification agent directly");
+    executor: async (input: {
+      brand_name: string;
+      core_offer: string;
+      industry: string;
+      pain_points: string;
+      automation_maturity: string;
+      buying_signals: string;
+      client_id?: string;
+      context_preamble?: string;
+    }) => {
+      const prompt = buildQualificationPrompt({
+        brandName: input.brand_name,
+        coreOffer: input.core_offer,
+        industry: input.industry,
+        painPoints: input.pain_points,
+        automationMaturity: input.automation_maturity,
+        buyingSignals: input.buying_signals,
+        contextPreamble: input.context_preamble,
+      });
+      return generateStructured(prompt, qualificationResultSchema, 0.2, input.client_id);
     },
     metadata: {
       category: "compute",
@@ -118,11 +168,34 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       recipient_name: z.string(),
       company_name: z.string(),
       pain_points: z.string(),
+      client_id: z.string().optional(),
       context_preamble: z.string().optional(),
       compaction: z.string().optional(),
     }),
-    executor: async () => {
-      throw new Error("generate_outreach is handled by the outreach agent directly");
+    executor: async (input: {
+      sender_name: string;
+      brand_name: string;
+      positioning: string;
+      tone: string;
+      recipient_name: string;
+      company_name: string;
+      pain_points: string;
+      client_id?: string;
+      context_preamble?: string;
+      compaction?: string;
+    }) => {
+      const prompt = buildOutreachPrompt({
+        senderName: input.sender_name,
+        brandName: input.brand_name,
+        positioning: input.positioning,
+        tone: input.tone,
+        recipientName: input.recipient_name,
+        companyName: input.company_name,
+        painPoints: input.pain_points,
+        contextPreamble: input.context_preamble,
+        compaction: input.compaction,
+      });
+      return generateStructured(prompt, outreachResultSchema, 0.2, input.client_id);
     },
     metadata: {
       category: "compute",
@@ -144,8 +217,17 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       table: z.string(),
       data: z.record(z.unknown()),
     }),
-    executor: async () => {
-      throw new Error("save_to_database is handled by the individual agent DB writes");
+    executor: async (input: { table: string; data: Record<string, unknown> }) => {
+      const { data: inserted, error } = await supabase
+        .from(input.table)
+        .insert(input.data)
+        .select();
+
+      if (error) {
+        throw new Error(`save_to_database failed: ${error.message}`);
+      }
+
+      return { success: true, record: inserted?.[0] ?? null };
     },
     metadata: {
       category: "storage",
@@ -294,10 +376,11 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       llm_model: z.string().optional().describe("LLM model name"),
     }),
     executor: async ({ url, domain, llm_api_key, llm_base_url, llm_model }: { url: string; domain: string; llm_api_key?: string; llm_base_url?: string; llm_model?: string }) => {
+      const rawBaseUrl = llm_base_url || process.env.LLM_BASE_URL || "https://integrate.api.nvidia.com/v1";
       const params = {
         url, domain,
         llm_api_key: llm_api_key || process.env.LLM_API_KEY || "",
-        llm_base_url: llm_base_url || process.env.LLM_BASE_URL || "https://integrate.api.nvidia.com/v1",
+        llm_base_url: rawBaseUrl.endsWith("/v1") ? rawBaseUrl : `${rawBaseUrl.replace(/\/+$/, "")}/v1`,
         llm_model: llm_model || process.env.LLM_MODEL || "meta/llama-3.1-8b-instruct",
       };
       const stdout = await callPythonScript(path.join(OPEN_SOURCE_DIR, "scrape_extract.py"), params);
@@ -331,12 +414,13 @@ export const LEAD_GEN_TOOLS: ToolDefinition[] = [
       llm_model: z.string().optional().describe("LLM model name"),
     }),
     executor: async ({ content, source_domain, brand_context, llm_api_key, llm_base_url, llm_model }: { content: string; source_domain: string; brand_context: string; llm_api_key?: string; llm_base_url?: string; llm_model?: string }) => {
+      const rawBaseUrl = llm_base_url || "https://integrate.api.nvidia.com/v1";
       const params = {
         content: content.slice(0, 10000),
         source_domain,
         brand_context,
         llm_api_key: llm_api_key || "",
-        llm_base_url: llm_base_url || "https://integrate.api.nvidia.com/v1",
+        llm_base_url: rawBaseUrl.endsWith("/v1") ? rawBaseUrl : `${rawBaseUrl.replace(/\/+$/, "")}/v1`,
         llm_model: llm_model || "meta/llama-3.1-8b-instruct",
       };
       const stdout = await callPythonScript(path.join(OPEN_SOURCE_DIR, "seed_extract.py"), params, 60000);

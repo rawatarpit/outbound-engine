@@ -5,8 +5,8 @@ import { getClientLLMSettings } from "../db/supabase";
 
 const logger = pino({ level: "info" });
 
-const MAX_RETRIES = 3;
-const TIMEOUT_MS = 120000;
+const MAX_RETRIES = 0;
+const TIMEOUT_MS = 30000;
 
 class RateLimiter {
   private maxRequests: number;
@@ -16,7 +16,7 @@ class RateLimiter {
   private timestamps: { at: number; tokens: number }[] = [];
   private lastRequestAt = 0;
 
-  constructor(maxRequests = 1, maxTokens = 5000, windowMs = 70_000, minIntervalMs = 61000) {
+  constructor(maxRequests = 30, maxTokens = 100_000, windowMs = 60_000, minIntervalMs = 2000) {
     this.maxRequests = maxRequests;
     this.maxTokens = maxTokens;
     this.windowMs = windowMs;
@@ -52,8 +52,6 @@ class RateLimiter {
 }
 
 const rateLimiter = new RateLimiter();
-
-let firstCall = true;
 
 /**
  * FIFO concurrency limiter.
@@ -191,21 +189,22 @@ async function rawCall(
   config: LLMConfig,
   temperature?: number,
   maxTokens?: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const temp = temperature ?? config.temperature;
   const tokens = maxTokens ?? DEFAULT_MAX_TOKENS;
 
   switch (config.provider) {
     case "ollama":
-      return callOllama(prompt, config, temp);
+      return callOllama(prompt, config, temp, timeoutMs);
     case "groq":
-      return callGroq(prompt, config, temp, tokens);
+      return callGroq(prompt, config, temp, tokens, timeoutMs);
     case "openai":
-      return callOpenAI(prompt, config, temp, tokens);
+      return callOpenAI(prompt, config, temp, tokens, timeoutMs);
     case "anthropic":
-      return callAnthropic(prompt, config, temp);
+      return callAnthropic(prompt, config, temp, timeoutMs);
     case "cloudflare":
-      return callCloudflare(prompt, config, temp);
+      return callCloudflare(prompt, config, temp, timeoutMs);
     default:
       throw new Error(`Unknown LLM provider: ${config.provider}`);
   }
@@ -221,6 +220,7 @@ async function callOllama(
   prompt: string,
   config: LLMConfig,
   temperature: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const url = `${config.baseUrl}/api/generate`;
 
@@ -234,7 +234,7 @@ async function callOllama(
         temperature,
       },
     },
-    { timeout: TIMEOUT_MS },
+    { timeout: timeoutMs ?? TIMEOUT_MS },
   );
 
   return response.data.response;
@@ -251,14 +251,10 @@ async function callGroq(
   config: LLMConfig,
   temperature: number,
   maxTokens: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
-  if (firstCall) {
-    firstCall = false;
-    logger.info("First LLM call — waiting 10s for stale rate limit window to expire");
-    await new Promise(r => setTimeout(r, 10000));
-  }
   await rateLimiter.acquire(maxTokens + 1000);
 
   const response = await axios.post(
@@ -274,7 +270,7 @@ async function callGroq(
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-      timeout: TIMEOUT_MS,
+      timeout: timeoutMs ?? TIMEOUT_MS,
     },
   );
 
@@ -292,16 +288,12 @@ async function callOpenAI(
   config: LLMConfig,
   temperature: number,
   maxTokens: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const url = config.baseUrl.includes("openai.com")
     ? "https://api.openai.com/v1/chat/completions"
     : `${config.baseUrl}/v1/chat/completions`;
 
-  if (firstCall) {
-    firstCall = false;
-    logger.info("First LLM call — waiting 10s for stale rate limit window to expire");
-    await new Promise(r => setTimeout(r, 10000));
-  }
   await rateLimiter.acquire(maxTokens + 1000);
 
   const response = await axios.post(
@@ -317,7 +309,7 @@ async function callOpenAI(
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-      timeout: TIMEOUT_MS,
+      timeout: timeoutMs ?? TIMEOUT_MS,
     },
   );
 
@@ -334,6 +326,7 @@ async function callAnthropic(
   prompt: string,
   config: LLMConfig,
   temperature: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const url = "https://api.anthropic.com/v1/messages";
 
@@ -351,7 +344,7 @@ async function callAnthropic(
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      timeout: TIMEOUT_MS,
+      timeout: timeoutMs ?? TIMEOUT_MS,
     },
   );
 
@@ -368,6 +361,7 @@ async function callCloudflare(
   prompt: string,
   config: LLMConfig,
   temperature: number,
+  timeoutMs?: number,
 ): Promise<string> {
   const url = `${config.baseUrl}/ai/v1/run/@cf/meta/llama-3.1-8b-instruct`;
 
@@ -384,7 +378,7 @@ async function callCloudflare(
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-      timeout: TIMEOUT_MS,
+      timeout: timeoutMs ?? TIMEOUT_MS,
     },
   );
 
@@ -512,6 +506,7 @@ export async function generateStructured<T>(
   clientId?: string,
   maxTokens?: number,
   modelOverride?: string,
+  timeoutMs?: number,
 ): Promise<T> {
   return llmQueue.enqueue(async () => {
     const baseConfig = await getLLMConfig(clientId);
@@ -531,7 +526,7 @@ export async function generateStructured<T>(
           prompt,
         ].join("\n");
 
-        const raw = await rawCall(fullPrompt, config, temperature, maxTokens);
+        const raw = await rawCall(fullPrompt, config, temperature, maxTokens, timeoutMs);
 
         let parsed: T;
         try {

@@ -362,3 +362,126 @@ export async function processSendQueue(brandId: string) {
     }
   }
 }
+
+export async function sendImmediately(
+  draftId: string,
+  brandId: string,
+): Promise<boolean> {
+  const brand = await getBrandProfile(brandId);
+  if (!brand || brand.is_paused) {
+    logger.warn({ brandId }, "Brand cannot send");
+    return false;
+  }
+
+  const { data: draft } = await supabase
+    .from("outreach")
+    .select("*, companies!inner(id, name, lead_score, domain)")
+    .eq("id", draftId)
+    .single();
+
+  if (!draft) {
+    logger.warn({ draftId }, "Draft not found");
+    return false;
+  }
+
+  const company = draft.companies as any;
+  const messageKey = buildMessageKey(company.id, brandId);
+
+  if (!company.domain && !brand.sending_domain) {
+    logger.warn({ draftId }, "No sending domain available");
+    return false;
+  }
+
+  const domain = brand.sending_domain || company.domain;
+
+  try {
+    const transportStable = await isTransportUnstable(brandId);
+    if (transportStable) {
+      logger.warn({ brandId }, "Transport unstable, skipping send");
+      return false;
+    }
+
+    const hasQuota = await consumeSendQuota(brandId, domain);
+    if (!hasQuota) {
+      logger.warn({ brandId, domain }, "No send quota available");
+      return false;
+    }
+
+    const { data: existing } = await supabase
+      .from("sent_messages")
+      .select("id")
+      .eq("message_key", messageKey)
+      .maybeSingle();
+
+    if (existing) {
+      logger.info({ messageKey }, "Message already sent");
+      return true;
+    }
+
+    await supabase.from("sent_messages").insert({
+      company_id: company.id,
+      brand_id: brandId,
+      message_key: messageKey,
+      subject: draft.subject,
+      body: draft.body,
+      status: "pending",
+    });
+
+    const { data: leadMap } = await supabase
+      .from("lead_company_map")
+      .select("lead_id")
+      .eq("company_id", company.id)
+      .maybeSingle();
+
+    let toEmail = "";
+    if (leadMap?.lead_id) {
+      const { data: lead } = await supabase
+        .from("leads")
+        .select("email")
+        .eq("id", leadMap.lead_id)
+        .maybeSingle();
+      toEmail = lead?.email || "";
+    }
+
+    if (!toEmail) {
+      logger.warn({ companyId: company.id }, "No recipient email");
+      return false;
+    }
+
+    const provider = await (await import("../email/providers")).getProvider(brand);
+
+    const transportMessageId = await provider.send({
+      brandId,
+      brandName: brand.brand_name,
+      to: toEmail,
+      subject: draft.subject,
+      body: draft.body,
+      threadMeta: { companyId: company.id, leadId: leadMap?.lead_id },
+      messageKey,
+    });
+
+    await supabase
+      .from("sent_messages")
+      .update({ status: "sent", smtp_message_id: transportMessageId, sent_at: new Date().toISOString() })
+      .eq("message_key", messageKey);
+
+    if (leadMap?.lead_id) {
+      await markLeadContacted(leadMap.lead_id, draft.subject, draft.body, transportMessageId || "");
+    }
+
+    await updateCompanyStatus(company.id, "draft_ready_processing", "contacted", brandId);
+    recordSuccess(brandId);
+    resetBackoff(brandId);
+
+    await supabase
+      .from("outreach")
+      .update({ status: "sent", sent_at: new Date().toISOString(), message_id: transportMessageId })
+      .eq("id", draftId);
+
+    logger.info({ draftId, company: company.name }, "Draft sent immediately");
+    return true;
+  } catch (err: any) {
+    logger.error({ err: err.message, draftId }, "Immediate send failed");
+    return false;
+  }
+}

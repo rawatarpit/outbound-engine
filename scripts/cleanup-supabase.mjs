@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://xtobbvffaxoiadserkbb.supabase.co"
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://hxmwrjoorlaeshbtasxh.supabase.co"
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 if (!SERVICE_KEY) {
   console.error("Fatal: SUPABASE_SERVICE_ROLE_KEY environment variable required")

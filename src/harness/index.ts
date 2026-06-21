@@ -65,3 +65,29 @@ export type {
 } from "./types";
 
 export { AgentResultStatus } from "./types";
+
+// ── Orchestration / Workflow ────────────────────────────────────────────
+
+export { routeIntent } from "./router";
+export type {
+  ChatIntent,
+  PipelineStage,
+  PipelineState,
+  RouterOutput,
+  PlannerOutput,
+  SynthesizerOutput,
+  PlannerStep,
+  WorkflowStep,
+  ExecutionPlan,
+  StepResult,
+  ProgressCallback,
+} from "./types";
+
+export { generatePlan } from "./planner";
+
+export { executePlan } from "./dispatcher";
+
+export { synthesizeResults } from "./synthesizer";
+
+export { runAgentLoop } from "./agentLoop";
+export type { AgentLoopInput, AgentLoopOutput } from "./agentLoop";
