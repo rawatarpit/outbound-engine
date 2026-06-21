@@ -7,7 +7,7 @@ SERVICE_KEY=$(grep SUPABASE_SERVICE_ROLE_KEY ~/outbound-engine/.env | cut -d= -f
 BRAND_ID="eca346ab-1cc0-4e85-bf63-1c111ff4bb32"
 BASE="http://localhost:3001"
 
-SESSION_ID=""
+SESSION_ID="${SESSION_ID:-}"
 
 chat() {
   local msg="$1"

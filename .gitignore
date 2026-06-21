@@ -29,3 +29,4 @@ credentials.*
 # OS
 .DS_Store
 Thumbs.db
+supabase/seed.sql
