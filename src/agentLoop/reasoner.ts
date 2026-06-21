@@ -159,7 +159,13 @@ Rules:
 - Tools with same parallel_group run concurrently
 - If user wants more leads after a batch, include offset in discover_leads input
 - If user mentioned liking/disliking companies, adjust preferences
-- is_final=true only when no more tools need to run (chat intent or done)`;
+- is_final=true only when no more tools need to run (chat intent or done)
+- **CRITICAL**: Do NOT call a tool if it has already been executed successfully. Check the pipeline state:
+  - If leads already exist (>0), do NOT call discover_leads unless user explicitly asks for more
+  - If researched already exist (>0), do NOT call research_leads
+  - If enriched/contacts already exist (>0), do NOT call enrich_leads
+  - If qualified already exist (>0), do NOT call qualify_leads
+- When no new tools are needed, return {"tool_calls": [], "is_final": true}`;
 
   try {
     const parsed = await generateStructured(prompt, ReasonerSchema, 0.3, input.brand.client_id ?? undefined, 500, undefined, 60000);

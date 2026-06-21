@@ -31,6 +31,14 @@ interface AgenticWorkerOutput {
   turns: number;
 }
 
+function isIntentDone(intent: string, state: PipelineState): boolean {
+  if (intent === "discover" && state.leads.length > 0) return true;
+  if (intent === "research" && state.researched.length > 0) return true;
+  if (intent === "enrich" && state.enriched.length > 0) return true;
+  if (intent === "qualify" && state.qualified.length > 0) return true;
+  return false;
+}
+
 export async function runAgenticWorker(input: AgenticWorkerInput): Promise<AgenticWorkerOutput> {
   const { message, brand, intent, sessionId, onProgress } = input;
   const preferences = getUserPreferences(sessionId);
@@ -42,7 +50,12 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const state = getPipelineState(sessionId)!;
 
-    // LLM reasoning step
+    // Skip if tool already executed for this intent
+    if (isIntentDone(intent.intent, state)) {
+      emit({ type: "llm_result", detail: `${intent.intent} already completed, skipping` });
+      break;
+    }
+
     emit({ type: "llm_start", detail: "Reasoning about which tools to call..." });
     const decision = await reasonNextTools({
       intent: intent.intent,
@@ -68,6 +81,11 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
 
     if (allResults.some(r => r.tool === "discover_leads" && r.status === "success")) {
       incrementBatchCount(sessionId);
+    }
+
+    // Only one turn per intent — break after first execution
+    if (allResults.some(r => r.status === "success")) {
+      break;
     }
   }
 
