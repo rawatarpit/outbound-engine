@@ -234,33 +234,44 @@ async function researchLeads(input: ToolInput): Promise<{ researched: unknown[] 
     .limit(input.max_leads || 10);
 
   const results: unknown[] = [];
-  for (const company of companies ?? []) {
-    try {
-      const website = company.website || (company.domain ? `https://${company.domain}` : undefined);
-      const agentResult = await runResearchAgent({
-        id: company.id,
-        name: company.name,
-        website,
-        brand_id: company.brand_id,
-      });
+  const TIMEOUT_MS = 60000;
+  const CONCURRENCY = 3;
 
-      if (agentResult.status === AgentResultStatus.SUCCESS) {
-        results.push({ company_id: company.id, status: "success" });
-        continue;
-      }
+  async function researchOne(company: { id: string; name: string; domain?: string | null; website?: string | null; brand_id: string }): Promise<unknown> {
+    const website = company.website || (company.domain ? `https://${company.domain}` : undefined);
+    const agentResult = await runResearchAgent({
+      id: company.id,
+      name: company.name,
+      website,
+      brand_id: company.brand_id,
+    });
 
-      // Agent failed — run multi-source research
-      const saved = await multiSourceResearch(company);
-      results.push({
-        company_id: company.id,
-        status: saved ? "partial" : "error",
-        note: saved
-          ? "Multi-source research completed (web search + socials + reviews + news)"
-          : agentResult.error || "All research sources failed",
-      });
-    } catch (err: any) {
-      logger.error({ company_id: company.id, err }, "Research failed");
-      results.push({ company_id: company.id, status: "error", error: err.message });
+    if (agentResult.status === AgentResultStatus.SUCCESS) {
+      return { company_id: company.id, status: "success" };
+    }
+
+    const saved = await multiSourceResearch(company);
+    return {
+      company_id: company.id,
+      status: saved ? "partial" : "error",
+      note: saved
+        ? "Multi-source research completed (web search + socials + reviews + news)"
+        : agentResult.error || "All research sources failed",
+    };
+  }
+
+  for (let i = 0; i < (companies ?? []).length; i += CONCURRENCY) {
+    const batch = (companies ?? []).slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(company =>
+        Promise.race([
+          researchOne(company),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Per-company research timeout")), TIMEOUT_MS)),
+        ]).catch((err: any) => ({ company_id: company.id, status: "error" as const, error: err.message }))
+      )
+    );
+    for (const r of batchResults) {
+      if (r.status === "fulfilled") results.push(r.value);
     }
   }
   return { researched: results };
