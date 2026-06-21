@@ -46,11 +46,11 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
   const emit = onProgress || (() => {});
 
   let allResults: StepResult[] = [];
+  const calledTools = new Set<string>();
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const state = getPipelineState(sessionId)!;
 
-    // Skip if tool already executed for this intent
     if (isIntentDone(intent.intent, state)) {
       emit({ type: "llm_result", detail: `${intent.intent} already completed, skipping` });
       break;
@@ -64,6 +64,7 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
       preferences,
       brand,
       userMessage: message,
+      calledTools: [...calledTools],
     });
 
     if (decision.isFinal || decision.toolCalls.length === 0) {
@@ -79,13 +80,13 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
       updatePipelineStateFromResults(sessionId, batchResults, decision, state!);
     }
 
-    if (allResults.some(r => r.tool === "discover_leads" && r.status === "success")) {
-      incrementBatchCount(sessionId);
+    // Track which tools succeeded this request
+    for (const r of allResults) {
+      if (r.status === "success") calledTools.add(r.tool);
     }
 
-    // Only one turn per intent — break after first execution
-    if (allResults.some(r => r.status === "success")) {
-      break;
+    if (allResults.some(r => r.tool === "discover_leads" && r.status === "success")) {
+      incrementBatchCount(sessionId);
     }
   }
 
@@ -114,7 +115,7 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
     results: allResults,
     response: response as SynthesizerOutput,
     toolCalls: allResults.length,
-    turns: allResults.length > 0 ? 1 : 0,
+    turns: calledTools.size,
   };
 }
 

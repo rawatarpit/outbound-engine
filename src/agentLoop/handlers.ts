@@ -12,6 +12,7 @@ import { runQualificationAgent } from "../agents/qualification";
 import { runOutreachAgent } from "../agents/outreach";
 import { startSignalDiscovery } from "../discovery/signals/engine";
 import { executeScraplingSearch, ScraplingResult } from "../core/utils/scrapling";
+import { runBrowserEnrich } from "../core/utils/browserEnrich";
 import { scrapeUrl } from "../core/utils/scraper";
 import { getProvider } from "../email/providers";
 
@@ -485,7 +486,40 @@ async function multiSourceEnrich(company: CompanyRef): Promise<unknown[]> {
     if (content) extractFromText(content);
   }
 
-  // Phase 3: Fallback — if we found names but no email, guess from domain
+  // Phase 3: Browser enrich — Playwright-powered website scraping for contacts
+  if (extracted.length === 0 && domain && !isGenericDomain) {
+    const browserResult = await runBrowserEnrich(domain, company.name, 85000).catch(() => ({
+      success: false, contacts: [], domain, error: "browser enrich error",
+    }));
+    for (const c of browserResult.contacts || []) {
+      if (c.email && !seenEmails.has(c.email)) {
+        seenEmails.add(c.email);
+        extracted.push({
+          email: c.email,
+          name: c.name || null,
+          title: c.title || null,
+          linkedin: c.linkedin || null,
+          phone: c.phone || null,
+        });
+      }
+      if (c.linkedin && !extracted.some(e => e.linkedin === c.linkedin)) {
+        // Save as a contact with just LinkedIn
+        const guessedEmail = c.email || `${c.name?.split(" ")[0]?.toLowerCase() || "contact"}@${domain}`;
+        if (!seenEmails.has(guessedEmail)) {
+          seenEmails.add(guessedEmail);
+          extracted.push({
+            email: guessedEmail,
+            name: c.name || null,
+            title: c.title || null,
+            linkedin: c.linkedin || null,
+            phone: null,
+          });
+        }
+      }
+    }
+  }
+
+  // Phase 4: Fallback — if we found names but no email, guess from domain
   if (extracted.length === 0 && domain && !domain.includes("example")) {
     const name = extractNameFromText(
       searchResults.flatMap(r => r.map(s => `${s.title || ""} ${s.body || ""}`)).join(" "),
@@ -504,7 +538,7 @@ async function multiSourceEnrich(company: CompanyRef): Promise<unknown[]> {
     }
   }
 
-  // Phase 4: Save each unique contact
+  // Phase 5: Save each unique contact
   const seenNames = new Set<string>();
   for (const item of extracted) {
     if (item.name && seenNames.has(item.name)) continue;

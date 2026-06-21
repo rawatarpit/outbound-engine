@@ -15,6 +15,7 @@ interface ReasonerInput {
   preferences: UserPreferences;
   brand: BrandProfile;
   userMessage: string;
+  calledTools?: string[];
 }
 
 const TOOL_PLANS: Record<string, { tools: Array<{ name: string; group: string; depends: string[] }> }> = {
@@ -62,7 +63,7 @@ const ReasonerSchema = z.object({
   is_final: z.boolean(),
 });
 
-function buildHardcodedPlan(intent: string, parameters: Record<string, unknown>, state: PipelineState, preferences: UserPreferences): ReasonedToolCall[] {
+function buildHardcodedPlan(intent: string, parameters: Record<string, unknown>, state: PipelineState, preferences: UserPreferences, calledTools?: string[]): ReasonedToolCall[] {
   const plan = TOOL_PLANS[intent];
   if (!plan) return [];
 
@@ -80,7 +81,10 @@ function buildHardcodedPlan(intent: string, parameters: Record<string, unknown>,
     return [];
   }
 
-  return plan.tools.map(t => {
+  const calledSet = new Set(calledTools || []);
+  return plan.tools
+    .filter(t => !calledSet.has(t.name))
+    .map(t => {
     const input: Record<string, unknown> = {};
 
     if (t.name === "discover_leads") {
@@ -165,6 +169,7 @@ Rules:
   - If researched already exist (>0), do NOT call research_leads
   - If enriched/contacts already exist (>0), do NOT call enrich_leads
   - If qualified already exist (>0), do NOT call qualify_leads
+- Already executed tools this request: ${(input.calledTools || []).join(", ") || "none"}. Do NOT call them again.
 - When no new tools are needed, return {"tool_calls": [], "is_final": true}`;
 
   try {
@@ -196,7 +201,7 @@ export async function reasonNextTools(input: ReasonerInput): Promise<ReasonerOut
   }
 
   // Hardcoded fallback
-  const hardcoded = buildHardcodedPlan(input.intent, input.parameters, input.state, input.preferences);
+  const hardcoded = buildHardcodedPlan(input.intent, input.parameters, input.state, input.preferences, input.calledTools);
   const isFinal = hardcoded.length === 0;
 
   logger.info({ intent: input.intent, toolCount: hardcoded.length, ms: Date.now() - start }, "Hardcoded plan used");

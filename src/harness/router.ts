@@ -24,7 +24,7 @@ const KEYWORD_ROUTES: Array<{
   extractParams: (msg: string) => Record<string, unknown>;
 }> = [
   {
-    patterns: [/find/i, /search/i, /discover/i, /look for/i, /find me/i, /show me/i, /get me/i],
+    patterns: [/find/i, /search/i, /discover/i, /look for/i, /find me/i, /show me/i, /get me/i, /need.*(leads|companies|prospects)/i, /looking for/i, /help.*find/i, /hunt/i],
     intent: "discover",
     confidence: 0.85,
     extractParams: (msg: string) => {
@@ -59,7 +59,7 @@ const KEYWORD_ROUTES: Array<{
     extractParams: () => ({}),
   },
   {
-    patterns: [/draft/i, /email/i, /outreach/i, /write/i, /compose/i, /create email/i],
+    patterns: [/draft/i, /email/i, /outreach/i, /write/i, /compose/i, /create.*email/i, /generate.*email/i, /email.*sequence/i, /cold.*email/i],
     intent: "outreach",
     confidence: 0.85,
     extractParams: () => ({}),
@@ -71,7 +71,7 @@ const KEYWORD_ROUTES: Array<{
     extractParams: () => ({}),
   },
   {
-    patterns: [/pipeline/i, /status/i, /progress/i, /where/i, /how far/i, /what.*done/i, /show.*pipeline/i],
+    patterns: [/pipeline/i, /status/i, /progress/i, /where/i, /how.?far/i, /what.*(done|found|have)/i, /show.*pipeline/i, /current.*state/i, /update/i],
     intent: "pipeline",
     confidence: 0.85,
     extractParams: () => ({}),
@@ -91,8 +91,14 @@ function keywordRouteIntent(message: string): RouterResult | null {
   if (/^(hi|hey|hello|good\s*(morning|afternoon|evening)|what'?s?\s*up|sup|howdy)\b/i.test(lower)) {
     return { intent: "chat", confidence: 0.9, parameters: {}, missingParams: [] };
   }
-  if (/^(thanks?|thank you|appreciate|great|awesome|perfect)\b/i.test(lower)) {
+  if (/^(thanks?|thank you|appreciate|great|awesome|perfect|ok|okay|sure)\b/i.test(lower)) {
     return { intent: "chat", confidence: 0.9, parameters: {}, missingParams: [] };
+  }
+  if (/^(can you|what can you|what do you|how do you|who are you|tell me about yourself)\b/i.test(lower)) {
+    return { intent: "chat", confidence: 0.8, parameters: {}, missingParams: [] };
+  }
+  if (/^(help|what can i|what should i|how (does|can|should))\b/i.test(lower)) {
+    return { intent: "chat", confidence: 0.75, parameters: {}, missingParams: [] };
   }
 
   for (const route of KEYWORD_ROUTES) {
