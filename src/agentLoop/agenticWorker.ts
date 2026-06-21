@@ -53,7 +53,7 @@ export async function runAgenticWorker(input: AgenticWorkerInput): Promise<Agent
 
     if (isIntentDone(intent.intent, state)) {
       emit({ type: "llm_result", detail: `${intent.intent} already completed, skipping` });
-      break;
+      continue;
     }
 
     emit({ type: "llm_start", detail: "Reasoning about which tools to call..." });
