@@ -140,11 +140,15 @@ async function discoverLeads(input: ToolInput): Promise<{ leads: unknown[]; quer
   const rawQuery = (input.query || "").replace(/^(find|search|discover|get)\s+/i, "").trim() ||
     (input.location ? `${industry} ${input.location}` : industry) || "companies";
 
-  // Use targeted queries: LinkedIn company pages + general web
+  // Use targeted queries that return actual company pages
+  const location = rawQuery.replace(/.*in\s+/i, "").trim();
+  const industry2 = rawQuery.replace(/\s+in\s+.*/i, "").trim();
   queries = [
-    `linkedin.com/company "${rawQuery}"`,
-    `"${rawQuery}" company`,
-    `${rawQuery}`,
+    // Directory-specific searches (more likely to have clean company data)
+    `site:clutch.co "${industry2}" "${location}"`,
+    `site:goodfirms.co "${industry2}" "${location}"`,
+    `"${industry2}" "${location}" "www." -blog -article`,
+    `"${industry2}" "${location}" company website`,
   ];
 
   // Load already-seen domains from DB to avoid duplicates across batches
